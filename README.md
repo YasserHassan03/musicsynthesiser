@@ -1,2 +1,10 @@
-# Piano Music Synthesiser
-This repositry contains work done as part of the second half of an embedded systems course. The course was designed by edstott and his lab instructions for getting started are on the edstott-lab-instructions branch of this repo
+# ES-synth-starter
+
+  Use this project as the starting point for your Embedded Systems labs and coursework.
+  
+  [Lab Part 1](doc/LabPart1.md)
+  
+  [Lab Part 2](doc/LabPart2.md)
+
+## Additional Information
+  [Handshaking and auto-detection](doc/handshaking.md)
