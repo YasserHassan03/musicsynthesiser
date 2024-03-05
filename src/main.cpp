@@ -33,9 +33,10 @@ const int DRST_BIT = 4;
 const int HKOW_BIT = 5;
 const int HKOE_BIT = 6;
 // struct to store system state
-struct
-{
-  std::bitset<32> inputs;
+struct {
+std::bitset<32> inputs;
+SemaphoreHandle_t mutex; 
+std::string rotaryState; 
 } sysState;
 
 // Display driver object
@@ -103,6 +104,22 @@ void setRow(uint8_t rowIdx)
   digitalWrite(RA2_PIN, rowIdx & 0x04);
   digitalWrite(REN_PIN, HIGH);
 }
+//function to decode knob
+void knobDecode(int a, int b, int previous_a, int previous_b)
+{
+ if((previous_a == 0 && previous_b ==0 && a == 1 && b == 0) || (previous_a ==1 && previous_b ==1 && b ==1 && a == 0))
+ {
+  xSemaphoreTake(sysState.mutex, portMAX_DELAY);
+   sysState.rotaryState = "1";
+  xSemaphoreGive(sysState.mutex);
+ }
+ else if((previous_a == 1 && previous_b ==0 && a == 0 && b == 0) || (previous_a ==0 && previous_b ==1 && b ==1 && a == 1))
+ {
+  xSemaphoreTake(sysState.mutex, portMAX_DELAY);
+   sysState.rotaryState = "-1";
+  xSemaphoreGive(sysState.mutex);
+ }
+}
 
 // Function to set outputs using key matrix
 void setOutMuxBit(const uint8_t bitIdx, const bool value)
@@ -119,21 +136,33 @@ void setOutMuxBit(const uint8_t bitIdx, const bool value)
 // function for scanning the keyboard into a single function:
 void scanKeysTask(void *pvParameters)
 {
-  const TickType_t xFrequency = 50 / portTICK_PERIOD_MS;
+  const TickType_t xFrequency = 20 / portTICK_PERIOD_MS;
   TickType_t xLastWakeTime = xTaskGetTickCount();
   while (1)
   {
     vTaskDelayUntil(&xLastWakeTime, xFrequency);
     std::bitset<32> inputs;
-    for (int i = 0; i < 3; i++)
+    for (int i = 0; i < 4; i++)
     {
       setRow(i);
       delayMicroseconds(3);
       std::bitset<4> input = readCols();
       inputs |= (input.to_ulong() << (i * 4));
     }
+    int previous_a;
+    int previous_b;
+    xSemaphoreTake(sysState.mutex, portMAX_DELAY);
+    int a = sysState.inputs[12];
+    int b = sysState.inputs[13];
+    xSemaphoreGive(sysState.mutex);
+    knobDecode(a, b, previous_a, previous_b);
+
+    xSemaphoreTake(sysState.mutex, portMAX_DELAY);
+    previous_a = sysState.inputs[12]; 
+    previous_b = sysState.inputs[13];
     sysState.inputs = inputs;
     int localStepSize = readStepSize(sysState.inputs);
+    xSemaphoreGive(sysState.mutex);
     __atomic_store_n(&currentStepSize, localStepSize, __ATOMIC_RELAXED);
   }
 }
@@ -148,10 +177,15 @@ void displayUpdateTask(void *pvParameters)
     u8g2.clearBuffer();                 // clear the internal memory
     u8g2.setFont(u8g2_font_ncenB08_tr); // choose a suitable font
     u8g2.drawStr(2, 10, "Helllo World!");
+    xSemaphoreTake(sysState.mutex, portMAX_DELAY);
     std::string note = getNote(sysState.inputs);
-    u8g2.drawStr(2, 30, note.c_str());
+    xSemaphoreGive(sysState.mutex);
+    //u8g2.drawStr(2, 30, note.c_str());
     u8g2.setCursor(2, 20);
+    xSemaphoreTake(sysState.mutex, portMAX_DELAY);
     u8g2.print(sysState.inputs.to_ulong(), HEX);
+    u8g2.drawStr(2, 30, sysState.rotaryState.c_str());
+    xSemaphoreGive(sysState.mutex);
     u8g2.sendBuffer(); // transfer internal memory to the display
     digitalToggle(LED_BUILTIN);
   }
@@ -211,6 +245,7 @@ void setup()
       NULL,             /* Parameter passed into the task */
       1,                /* Task priority */
       &displayUpdateHandle); /* Pointer to store the task handle */
+  sysState.mutex = xSemaphoreCreateMutex();
   vTaskStartScheduler();
 }
 
