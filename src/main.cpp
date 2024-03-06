@@ -105,14 +105,14 @@ void scanKeysTask(void *pvParameters){
     __atomic_store_n(&currentStepSize, localCurrentStepSize, __ATOMIC_RELAXED);
     bool curA = sysState.inputs[12];
     bool curB = sysState.inputs[13]; 
-  if ((!prevA && !prevB && !curB && curA) || (prevA && prevB && curB && !curA)) {
-    if (__atomic_load_n(&sysState.rotationCount, __ATOMIC_RELAXED) < 8){
-      __atomic_store_n(&sysState.rotationCount, __atomic_load_n(&sysState.rotationCount, __ATOMIC_RELAXED) + 1, __ATOMIC_RELAXED);
+    if ((!prevA && !prevB && !curB && curA) || (prevA && prevB && curB && !curA)) {
+      if (__atomic_load_n(&sysState.rotationCount, __ATOMIC_RELAXED) < 8){
+        __atomic_store_n(&sysState.rotationCount, __atomic_load_n(&sysState.rotationCount, __ATOMIC_RELAXED) + 1, __ATOMIC_RELAXED);
     }
   }
-  else if ((prevA && !prevB && !curB && !curA) || (!prevA && prevB && curB && curA)) {
-    if (__atomic_load_n(&sysState.rotationCount, __ATOMIC_RELAXED) > 0){
-      __atomic_store_n(&sysState.rotationCount, __atomic_load_n(&sysState.rotationCount, __ATOMIC_RELAXED) - 1, __ATOMIC_RELAXED);
+    else if ((prevA && !prevB && !curB && !curA) || (!prevA && prevB && curB && curA)) {
+      if (__atomic_load_n(&sysState.rotationCount, __ATOMIC_RELAXED) > 0){
+        __atomic_store_n(&sysState.rotationCount, __atomic_load_n(&sysState.rotationCount, __ATOMIC_RELAXED) - 1, __ATOMIC_RELAXED);
     }
   }
     prevA = curA;
