@@ -7,22 +7,22 @@
 
 //Constants
   const uint32_t interval = 100; //Display update interval
-    const uint32_t stepSizes [] = {49977801, 54113269, 57330981, 60740013, 64351885, 68178311, 72232370, 76527532, 81078245, 85899346, 91007233, 96418697};
-    const std::string notes [] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
-    volatile uint32_t currentStepSize;
-    std::string note = "No note detected";
-    struct {
-      std::bitset<32> inputs;
-      volatile int rotationCount;
-      SemaphoreHandle_t mutex;  
-    } sysState;
+  const uint32_t stepSizes [] = {49977801, 54113269, 57330981, 60740013, 64351885, 68178311, 72232370, 76527532, 81078245, 85899346, 91007233, 96418697};
+  const std::string notes [] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
+  volatile uint32_t currentStepSize;
+  std::string note = "No note detected";
+  struct {
+    std::bitset<32> inputs;
+    volatile int rotationCount;
+    SemaphoreHandle_t mutex;  
+  } sysState;
 
   //Pin definitions
-    //Row select and enable
-    const int RA0_PIN = D3;
-    const int RA1_PIN = D6;
-    const int RA2_PIN = D12;
-    const int REN_PIN = A5;
+  //Row select and enable
+  const int RA0_PIN = D3;
+  const int RA1_PIN = D6;
+  const int RA2_PIN = D12;
+  const int REN_PIN = A5;
 
   //Matrix input and output
   const int C0_PIN = A2;
