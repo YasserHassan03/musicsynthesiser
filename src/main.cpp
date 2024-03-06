@@ -7,18 +7,22 @@
 
 //Constants
   const uint32_t interval = 100; //Display update interval
-  const uint32_t stepSizes [] = {49977801, 54113269, 57330981, 60740013, 64351885, 68178311, 72232370, 76527532, 81078245, 85899346, 91007233, 96418697};
-  const std::string notes [] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
-  volatile uint32_t currentStepSize;
-  std::string note = "No note detected";
-  struct {std::bitset<32> inputs;} sysState;
+    const uint32_t stepSizes [] = {49977801, 54113269, 57330981, 60740013, 64351885, 68178311, 72232370, 76527532, 81078245, 85899346, 91007233, 96418697};
+    const std::string notes [] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
+    volatile uint32_t currentStepSize;
+    std::string note = "No note detected";
+    struct {
+      std::bitset<32> inputs;
+      volatile int rotationCount;
+      SemaphoreHandle_t mutex;  
+    } sysState;
 
-//Pin definitions
-  //Row select and enable
-  const int RA0_PIN = D3;
-  const int RA1_PIN = D6;
-  const int RA2_PIN = D12;
-  const int REN_PIN = A5;
+  //Pin definitions
+    //Row select and enable
+    const int RA0_PIN = D3;
+    const int RA1_PIN = D6;
+    const int RA2_PIN = D12;
+    const int REN_PIN = A5;
 
   //Matrix input and output
   const int C0_PIN = A2;
@@ -74,20 +78,23 @@ void setRow(uint8_t rowIdx){
 }
 
 void scanKeysTask(void *pvParameters){
-  const TickType_t xFrequency = 50/portTICK_PERIOD_MS;
+  const TickType_t xFrequency = 20/portTICK_PERIOD_MS;
   TickType_t xLastWakeTime = xTaskGetTickCount();
+  bool prevA = false, prevB = false;
+  std::string note;
 
   while (1) {
     vTaskDelayUntil( &xLastWakeTime, xFrequency );
+    xSemaphoreTake(sysState.mutex, portMAX_DELAY);
     uint32_t localCurrentStepSize;
     sysState.inputs.reset();
-    for (int i = 0; i<3; i++){
+    for (int i = 0; i<=3; i++){
       setRow(i);
       delayMicroseconds(3);
       sysState.inputs |= (readCols().to_ulong() << (4 * i));
     }
-    if (sysState.inputs != 0xFFF) {
-      int index = static_cast<int>(std::log2((0xFFF - sysState.inputs.to_ulong())));
+    if ((sysState.inputs.to_ulong() & 0xFFF) != 0xFFF) {
+      int index = static_cast<int>(std::log2((0xFFF - (sysState.inputs.to_ulong() & 0xFFF))));
       localCurrentStepSize = stepSizes[index];
       note = notes[index];
     }
@@ -96,6 +103,21 @@ void scanKeysTask(void *pvParameters){
       note = "No note detected";
     }
     __atomic_store_n(&currentStepSize, localCurrentStepSize, __ATOMIC_RELAXED);
+    bool curA = sysState.inputs[12];
+    bool curB = sysState.inputs[13]; 
+  if ((!prevA && !prevB && !curB && curA) || (prevA && prevB && curB && !curA)) {
+    if (__atomic_load_n(&sysState.rotationCount, __ATOMIC_RELAXED) < 8){
+      __atomic_store_n(&sysState.rotationCount, __atomic_load_n(&sysState.rotationCount, __ATOMIC_RELAXED) + 1, __ATOMIC_RELAXED);
+    }
+  }
+  else if ((prevA && !prevB && !curB && !curA) || (!prevA && prevB && curB && curA)) {
+    if (__atomic_load_n(&sysState.rotationCount, __ATOMIC_RELAXED) > 0){
+      __atomic_store_n(&sysState.rotationCount, __atomic_load_n(&sysState.rotationCount, __ATOMIC_RELAXED) - 1, __ATOMIC_RELAXED);
+    }
+  }
+    prevA = curA;
+    prevB = curB;
+    xSemaphoreGive(sysState.mutex);
   }
 }
 
@@ -109,7 +131,10 @@ void displayUpdate(void *pvParameters){
     u8g2.setFont(u8g2_font_ncenB08_tr); 
     u8g2.drawStr(2,10,"Stack Synthesizer!!");  
     u8g2.setCursor(2,20);
-    u8g2.print(sysState.inputs.to_ulong(),HEX);  
+    xSemaphoreTake(sysState.mutex, portMAX_DELAY);
+    u8g2.print(sysState.inputs.to_ulong() & 0xFFF,HEX);  
+    u8g2.print(sysState.rotationCount,DEC);  
+    xSemaphoreGive(sysState.mutex);
     u8g2.drawStr(2, 30, note.c_str());
     u8g2.sendBuffer();          
     digitalToggle(LED_BUILTIN);
@@ -122,6 +147,7 @@ void sampleISR(){
   __atomic_load(&currentStepSize, &localCurrentStepSize, __ATOMIC_RELAXED);
   phaseAcc += localCurrentStepSize;
   int32_t Vout = (phaseAcc >> 24) - 128;
+  Vout = Vout >> (8 - __atomic_load_n(&sysState.rotationCount, __ATOMIC_RELAXED));
   analogWrite(OUTR_PIN, Vout + 128);
 }
 
@@ -178,6 +204,7 @@ void setup() {
   //Initialise UART
   Serial.begin(9600);
   Serial.println("Hello World");
+  sysState.mutex = xSemaphoreCreateMutex();
   vTaskStartScheduler();
 }
 
