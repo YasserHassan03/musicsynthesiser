@@ -190,7 +190,6 @@ void loop() {
 
   //Toggle LED
   digitalToggle(LED_BUILTIN);
-  delay(100);  
 }
 
 
@@ -201,8 +200,6 @@ void loop() {
 
 
 uint32_t getStepSize(uint16_t key) {
-  // Serial.printf("key: %d, step:%d\n", key, step);
-
   for (uint8_t i = 0; i < 12; i++) {
     if ((key & keys[i]) == 0) {
       return steps[i];
