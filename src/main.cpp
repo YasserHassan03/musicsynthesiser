@@ -1,6 +1,5 @@
 #include <Arduino.h>
 #include <U8g2lib.h>
-#include <atomic>
 #include <STM32FreeRTOS.h> 
 #include <Context.hpp>
 
