@@ -50,7 +50,7 @@ const uint16_t keys[12] = {0x1, 0x2, 0x4, 0x8, 0x10, 0x20, 0x40, 0x80, 0x100, 0x
 Context context;
 
 
-void sampleISR();
+callback_function_t sampleISR();
 void scanKeysTask(void * pvParameters);
 uint32_t getStepSize(uint16_t key);
 void setOutMuxBit(const uint8_t bitIdx, const bool value);
@@ -131,13 +131,12 @@ void scanKeysTask(void * pvParameters) {
     __atomic_store_n(&step, stepValue, __ATOMIC_RELAXED);
     // xSemaphoreGive(context.mutex);
   }
-
 }
 
 
-void sampleISR()
+callback_function_t sampleISR()
 {
-  int currentStep = 0;
+  uint32_t currentStep = 0;
   __atomic_load(&step, &currentStep, __ATOMIC_RELAXED);
   static uint32_t phaseAcc = 0;
   phaseAcc += currentStep;
