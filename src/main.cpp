@@ -2,6 +2,7 @@
 #include <U8g2lib.h>
 #include <STM32FreeRTOS.h> 
 #include <Context.hpp>
+#include <cstdint>
 
 //Constants
   const uint32_t interval = 100; //Display update interval
@@ -45,9 +46,8 @@ U8G2_SSD1305_128X32_NONAME_F_HW_I2C u8g2(U8G2_R0);
 
 const uint32_t steps[12] = {49977801, 54113269, 57330981, 60740013, 64351885, 68178311, 72232370, 76527532, 81078245, 85899346,91007233, 96418697}; 
 const uint16_t keys[12] = {0x1, 0x2, 0x4, 0x8, 0x10, 0x20, 0x40, 0x80, 0x100, 0x200, 0x400, 0x800};
-
+const char * notes[13] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B", "No Note"};
 Context context;
-
 
 void sampleISR();
 void scanKeysTask(void * pvParameters);
@@ -56,6 +56,7 @@ void setOutMuxBit(const uint8_t bitIdx, const bool value);
 uint8_t readCols ();
 uint32_t readMatrix();
 void setRow (const uint8_t row);
+const char * getNote(const uint16_t keys);
 volatile uint32_t step = 0;
 
 
@@ -162,7 +163,8 @@ void loop() {
   context.lock(); 
   copyState = context.getState();
   context.unlock();
-  u8g2.print(copyState, HEX);
+  const char * note = getNote((uint16_t) copyState & KEY_MASK);
+  u8g2.drawStr(2, 20, note);
   u8g2.sendBuffer();          // transfer internal memory to the display
 
     //Toggle LED
@@ -225,4 +227,15 @@ uint32_t readMatrix() {
 
 }
 
+// function that matches the step size to the note
+const char * getNote(const uint16_t keys) {
+  for (int i = 0; i < 12; ++i)
+  {
+    if ((keys & (1 << i)) == 0)
+    {
+      return notes[i];
+    }
+  }
+  return notes[12];
+}
 
