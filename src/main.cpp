@@ -1,45 +1,53 @@
+#include "wiring_time.h"
 #include <Arduino.h>
+#include <STM32FreeRTOS.h>
 #include <U8g2lib.h>
-#include <STM32FreeRTOS.h> 
 #include <Context.hpp>
 #include <cstdint>
 
+
+
+
 //Constants
-  const uint32_t interval = 100; //Display update interval
+const uint32_t interval = 100; //Display update interval
 
 //Pin definitions
-  //Row select and enable
-  const int RA0_PIN = D3;
-  const int RA1_PIN = D6;
-  const int RA2_PIN = D12;
-  const int REN_PIN = A5;
+//Row select and enable
+const int RA0_PIN = D3;
+const int RA1_PIN = D6;
+const int RA2_PIN = D12;
+const int REN_PIN = A5;
 
-  //Matrix input and output
-  const int C0_PIN = A2;
-  const int C1_PIN = D9;
-  const int C2_PIN = A6;
-  const int C3_PIN = D1;
-  const int OUT_PIN = D11;
+//Matrix input and output
+const int C0_PIN = A2;
+const int C1_PIN = D9;
+const int C2_PIN = A6;
+const int C3_PIN = D1;
+const int OUT_PIN = D11;
 
-  //Audio analogue out
-  const int OUTL_PIN = A4;
-  const int OUTR_PIN = A3;
+//Audio analogue out
+const int OUTL_PIN = A4;
+const int OUTR_PIN = A3;
 
-  //Joystick analogue in
-  const int JOYY_PIN = A0;
-  const int JOYX_PIN = A1;
+//Joystick analogue in
+const int JOYY_PIN = A0;
+const int JOYX_PIN = A1;
 
-  //Output multiplexer bits
-  const int DEN_BIT = 3;
-  const int DRST_BIT = 4;
-  const int HKOW_BIT = 5;
-  const int HKOE_BIT = 6;
-
-
+//Output multiplexer bits
+const int DEN_BIT = 3;
+const int DRST_BIT = 4;
+const int HKOW_BIT = 5;
+const int HKOE_BIT = 6;
 
 
 // DEFINES 
 #define KEY_MASK 0xFFF
+#define DAC_WRITE_FREQ 22000
+
+
+// Initiaion Intervals
+const TickType_t xStateUpdateFreq = 50/portTICK_PERIOD_MS; // 50ms Initiation Interval
+
 
 //Display driver object
 U8G2_SSD1305_128X32_NONAME_F_HW_I2C u8g2(U8G2_R0);
@@ -47,7 +55,7 @@ U8G2_SSD1305_128X32_NONAME_F_HW_I2C u8g2(U8G2_R0);
 const uint32_t steps[12] = {49977801, 54113269, 57330981, 60740013, 64351885, 68178311, 72232370, 76527532, 81078245, 85899346,91007233, 96418697}; 
 const uint16_t keys[12] = {0x1, 0x2, 0x4, 0x8, 0x10, 0x20, 0x40, 0x80, 0x100, 0x200, 0x400, 0x800};
 const char * notes[13] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B", "No Note"};
-Context context;
+Context context = Context();
 
 void sampleISR();
 void scanKeysTask(void * pvParameters);
@@ -92,7 +100,7 @@ void setup() {
 
   TIM_TypeDef *Instance = TIM1;
   HardwareTimer *sampleTimer = new HardwareTimer(Instance);
-  sampleTimer->setOverflow(22000, HERTZ_FORMAT);
+  sampleTimer->setOverflow(DAC_WRITE_FREQ, HERTZ_FORMAT);
   sampleTimer->attachInterrupt(sampleISR);
   sampleTimer->resume();
 
@@ -112,37 +120,44 @@ void setup() {
 }
 
 
+
+// ----------------------------------------------------- // 
+// -------------------   Tasks   ----------------------- // 
+// ----------------------------------------------------- //
+
+
 void scanKeysTask(void * pvParameters) {
 
   uint32_t stepValue = 0;
-  const TickType_t xFrequency = 50/portTICK_PERIOD_MS;
   TickType_t xLastWakeTime = xTaskGetTickCount();
   uint32_t currentState = 0;
-
+  uint32_t newState = 0;
   while (1)
   {
-    vTaskDelayUntil(&xLastWakeTime, xFrequency);
-    // xSemaphoreTake(context.mutex, portMAX_DELAY); 
+    vTaskDelayUntil(&xLastWakeTime, xStateUpdateFreq);
+    newState = readMatrix();
     context.lock();
-    context.setState(readMatrix());
-    currentState = context.getState();
+    context.updateVolume(newState);
+    context.setState(newState);
     context.unlock();
-    stepValue = getStepSize(currentState & KEY_MASK);
+    stepValue = getStepSize(newState & KEY_MASK);
     __atomic_store_n(&step, stepValue, __ATOMIC_RELAXED);
-    // xSemaphoreGive(context.mutex);
   }
 
 }
 
-
 void sampleISR()
 {
   uint32_t currentStep = 0;
+  uint8_t volume;
   __atomic_load(&step, &currentStep, __ATOMIC_RELAXED);
   static uint32_t phaseAcc = 0;
   phaseAcc += currentStep;
-  int32_t Vout = (phaseAcc >> 24) - 128;
-  analogWrite(OUTR_PIN, Vout + 128);
+  int32_t vout = (phaseAcc >> 24) - 128;
+  // context.lock();
+  volume = context.getVolume();
+  vout = vout >> (8 - volume);
+  analogWrite(OUTR_PIN, vout + 128);
 }
 
 
@@ -158,20 +173,31 @@ void loop() {
   //Update display
   u8g2.clearBuffer();         // clear the internal memory
   u8g2.setFont(u8g2_font_ncenB08_tr); // choose a suitable font
-  u8g2.setCursor(10, 20);
   uint32_t copyState;
+  uint8_t volume;
   context.lock(); 
   copyState = context.getState();
+  volume = context.getVolume();
   context.unlock();
   const char * note = getNote((uint16_t) copyState & KEY_MASK);
   u8g2.drawStr(2, 20, note);
+  u8g2.setCursor(70, 20);
+  u8g2.print(copyState, HEX);
+  u8g2.setCursor(50, 20);
+  u8g2.print(volume, HEX);
+
   u8g2.sendBuffer();          // transfer internal memory to the display
 
-    //Toggle LED
+  //Toggle LED
   digitalToggle(LED_BUILTIN);
-  
+  delay(100);  
 }
 
+
+
+// ----------------------------------------------------- // 
+// ----------------   Task helpers --------------------- // 
+// ----------------------------------------------------- //
 
 
 uint32_t getStepSize(uint16_t key) {

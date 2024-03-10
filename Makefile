@@ -21,4 +21,5 @@ refresh_lsp:
 	rm -rf compile_commands.json
 	pio run -t compiledb
 
-
+disass:
+	arm-linux-gnueabi-objdump -D .pio/build/nucleo_l432kc/firmware.elf > diass.s	
