@@ -3,7 +3,7 @@
 
 
 Context::Context()
-  :_state(0), _mutex(xSemaphoreCreateMutex()), _volume(0), _lowerLimit(0), _upperLimit(8)
+  :_state(0), _mutex(xSemaphoreCreateMutex()), _volume(0), _lowerLimit(0), _upperLimit(8), _octave(First)
   {}
 
 Context::~Context() {
@@ -28,14 +28,14 @@ void Context::setVolumeLimits(int lower, int upper)
   _upperLimit = upper;
 }
 
-
+// TODO: Rewrite as a function of current state and new state -> Reduces insructions and load on CPU
 void Context::updateVolume(uint32_t newState)
 {
   uint8_t previous_a = (_state & 0x4000) >> 14;
   uint8_t previous_b = (_state & 0x8000) >> 15;
   uint8_t a = (newState & 0x4000) >> 14;
   uint8_t b = (newState & 0x8000) >> 15;
-
+  
   
   if ((previous_a == 0 && previous_b == 0 && a == 1 && b == 0) || (previous_a == 1 && previous_b == 1 && b == 1 && a == 0))
   {

@@ -4,12 +4,14 @@
 #include <U8g2lib.h>
 #include <Context.hpp>
 #include <cstdint>
-
-
+#include <cstdio>
+#include <sys/types.h>
+#include <ES_CAN.h>
 
 
 //Constants
 const uint32_t interval = 100; //Display update interval
+uint32_t ID = 0x123;
 
 //Pin definitions
 //Row select and enable
@@ -43,7 +45,10 @@ const int HKOE_BIT = 6;
 // DEFINES 
 #define KEY_MASK 0xFFF
 #define DAC_WRITE_FREQ 22000
-
+#define KEY_PRESSED 0x50
+#define KEY_RELEASED 0x52
+#define TOTAL_KEYS 12u
+#define MESSAGE_SIZE 8
 
 // Initiaion Intervals
 const TickType_t xStateUpdateFreq = 50/portTICK_PERIOD_MS; // 50ms Initiation Interval
@@ -52,25 +57,51 @@ const TickType_t xStateUpdateFreq = 50/portTICK_PERIOD_MS; // 50ms Initiation In
 //Display driver object
 U8G2_SSD1305_128X32_NONAME_F_HW_I2C u8g2(U8G2_R0);
 
+
+// <$> Constant Arrays <$>
 const uint32_t steps[12] = {49977801, 54113269, 57330981, 60740013, 64351885, 68178311, 72232370, 76527532, 81078245, 85899346,91007233, 96418697}; 
-const uint16_t keys[12] = {0x1, 0x2, 0x4, 0x8, 0x10, 0x20, 0x40, 0x80, 0x100, 0x200, 0x400, 0x800};
+const uint16_t keyMasks[12] = {0x1, 0x2, 0x4, 0x8, 0x10, 0x20, 0x40, 0x80, 0x100, 0x200, 0x400, 0x800};
 const char * notes[13] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B", "No Note"};
+
+
+// TODO: Change Context to singleton as per instruction
+// Initialise Global Variables
 Context context = Context();
 
+// TODO: Encapsulate txMessages, and rxMessages in a way that does not use alot of memory, and without dynamic memory allocation
+uint8_t txMessages[MESSAGE_SIZE] = {0}; 
+QueueHandle_t msgInQ = xQueueCreate(36, MESSAGE_SIZE);
+QueueHandle_t msgOutQ = xQueueCreate(36, MESSAGE_SIZE);
+SemaphoreHandle_t txSemaphore = xSemaphoreCreateCounting(3,3);
+volatile uint32_t step = 0;
+
+// ISR's
 void sampleISR();
-void scanKeysTask(void * pvParameters);
+void canRxISR();
+void canTxISR();
+
+// Tasks
+void scanKeysTask(void * params);
+void decodeTask(void * params);
+void transmitTask(void * params);
+
+// Task handles 
+TaskHandle_t scanKeysHandle = NULL;
+TaskHandle_t decodeTaskHandle = NULL;
+TaskHandle_t transmitTaskHandle = NULL;
+
+
+// Helpers
 uint32_t getStepSize(uint16_t key);
 void setOutMuxBit(const uint8_t bitIdx, const bool value);
 uint8_t readCols ();
 uint32_t readMatrix();
 void setRow (const uint8_t row);
 const char * getNote(const uint16_t keys);
-volatile uint32_t step = 0;
-
+void serialPrintBuff(volatile uint8_t * buff);
+void updateTxMessage(uint32_t currentState, uint32_t newState, Octave oct);
 
 void setup() {
-  // put your setup code here, to run once:
-
   //Set pin directions
   pinMode(RA0_PIN, OUTPUT);
   pinMode(RA1_PIN, OUTPUT);
@@ -94,18 +125,31 @@ void setup() {
   u8g2.begin();
   setOutMuxBit(DEN_BIT, HIGH);  //Enable display power supply
 
+
   //Initialise UART
   Serial.begin(9600);
   Serial.println("Hello World");
+  
+  // Initialise CAN Bus
+  CAN_Init(true);
+  setCANFilter(0x123,0x7ff);
+  CAN_Start();
 
+
+  // TODO: Repace with Ping Pong buffer + DMA
+  // Initialise DAC ISR
   TIM_TypeDef *Instance = TIM1;
   HardwareTimer *sampleTimer = new HardwareTimer(Instance);
   sampleTimer->setOverflow(DAC_WRITE_FREQ, HERTZ_FORMAT);
   sampleTimer->attachInterrupt(sampleISR);
   sampleTimer->resume();
-
-  TaskHandle_t scanKeysHandle = NULL;
-
+  
+  // Initialise CAN RX ISR
+  CAN_RegisterRX_ISR(canRxISR);
+  CAN_RegisterTX_ISR(canTxISR);
+  
+  
+  // Create Tasks
   xTaskCreate(
     scanKeysTask,		/* Function that implements the task */
     "scanKeys",		/* Text name for the task */
@@ -116,35 +160,38 @@ void setup() {
   ); 
 
 
+  // TODO: Justify Parameters
+  xTaskCreate(
+    decodeTask,		/* Function that implements the task */
+    "decodeMsg",		/* Text name for the task */
+    64,      		/* Stack size in words, not bytes */
+    NULL,			/* Parameter passed into the task */
+    1,			/* Task priority */
+    &decodeTaskHandle 
+  );
+  
+
+  // TODO: Justify Parameters
+  xTaskCreate(
+    transmitTask,		/* Function that implements the task */
+    "transmitTask",		/* Text name for the task */
+    64,      		/* Stack size in words, not bytes */
+    NULL,			/* Parameter passed into the task */
+    1,			/* Task priority */
+    &transmitTaskHandle 
+  );
+
+
+  // Start Scheduler
   vTaskStartScheduler(); 
 }
 
 
 
-// ----------------------------------------------------- // 
-// -------------------   Tasks   ----------------------- // 
+
 // ----------------------------------------------------- //
-
-
-void scanKeysTask(void * pvParameters) {
-
-  uint32_t stepValue = 0;
-  TickType_t xLastWakeTime = xTaskGetTickCount();
-  uint32_t currentState = 0;
-  uint32_t newState = 0;
-  while (1)
-  {
-    vTaskDelayUntil(&xLastWakeTime, xStateUpdateFreq);
-    newState = readMatrix();
-    context.lock();
-    context.updateVolume(newState);
-    context.setState(newState);
-    context.unlock();
-    stepValue = getStepSize(newState & KEY_MASK);
-    __atomic_store_n(&step, stepValue, __ATOMIC_RELAXED);
-  }
-
-}
+// --------------------   ISR's    --------------------- //
+// ----------------------------------------------------- //
 
 void sampleISR()
 {
@@ -154,15 +201,32 @@ void sampleISR()
   static uint32_t phaseAcc = 0;
   phaseAcc += currentStep;
   int32_t vout = (phaseAcc >> 24) - 128;
-  // context.lock();
-  volume = context.getVolume();
+  volume = context.getVolume(); // Atmoc operation
   vout = vout >> (8 - volume);
   analogWrite(OUTR_PIN, vout + 128);
 }
 
 
+
+void canRxISR (void) {
+	uint8_t rxMessages[8];
+	uint32_t ID;
+	CAN_RX(ID, rxMessages);
+	xQueueSendFromISR(msgInQ, rxMessages, NULL);
+}
+
+
+void canTxISR (void) {
+	xSemaphoreGiveFromISR(txSemaphore, NULL);
+}
+
+// ----------------------------------------------------- //
+// --------------------   Tasks    --------------------- //
+// ----------------------------------------------------- //
+
+
+// Display Task
 void loop() {
-  // put your main code here, to run repeatedly:
   static uint32_t next = millis();
   static uint32_t count = 0;
 
@@ -181,27 +245,81 @@ void loop() {
   context.unlock();
   const char * note = getNote((uint16_t) copyState & KEY_MASK);
   u8g2.drawStr(2, 20, note);
-  u8g2.setCursor(70, 20);
-  u8g2.print(copyState, HEX);
+  u8g2.setCursor(90, 20);
+  u8g2.print((uint16_t) copyState, HEX);
   u8g2.setCursor(50, 20);
   u8g2.print(volume, HEX);
-
+  u8g2.setCursor(60, 20);
+  u8g2.print( (((uint16_t) txMessages[1]) << 8) + txMessages[0], HEX);
+  
   u8g2.sendBuffer();          // transfer internal memory to the display
 
+  
   //Toggle LED
   digitalToggle(LED_BUILTIN);
 }
 
 
 
+void scanKeysTask(void * params) {
+
+  uint32_t stepValue = 0;
+  TickType_t xLastWakeTime = xTaskGetTickCount();
+  uint32_t currentState = 0;
+  uint32_t newState = 0;
+  Octave oct;
+
+  while (1)
+  {
+    vTaskDelayUntil(&xLastWakeTime, xStateUpdateFreq);
+    newState = readMatrix();
+    context.lock();
+    currentState = context.getState();
+    context.updateVolume(newState);
+    context.setState(newState);
+    oct = context.getOctave();
+    context.unlock();
+    updateTxMessage(currentState, newState, oct);
+    xQueueSend(msgOutQ, txMessages, portMAX_DELAY);
+    stepValue = getStepSize(newState & KEY_MASK);
+    __atomic_store_n(&step, stepValue, __ATOMIC_RELAXED);
+  }
+
+}
+
+
+// Will wait portMAX_DELAY before continuing, hence portMAX_DELAY is the minimum Initiation interval
+void decodeTask(void * params) {
+  
+  uint8_t rxMessage[8];
+  
+  while (1) {
+    xQueueReceive(msgInQ, rxMessage, portMAX_DELAY); 
+    // TODO: Implement Mixer in order to respond to incoming messages
+  }
+}
+
+
+void transmitTask(void * params) {
+	uint8_t msgOut[8];
+
+	while (1) {
+		xQueueReceive(msgOutQ, msgOut, portMAX_DELAY);
+		xSemaphoreTake(txSemaphore, portMAX_DELAY);
+		CAN_TX(0x123, msgOut);
+	}
+
+}
+
+
 // ----------------------------------------------------- // 
-// ----------------   Task helpers --------------------- // 
+// ----------------     Helpers    --------------------- // 
 // ----------------------------------------------------- //
 
 
 uint32_t getStepSize(uint16_t key) {
-  for (uint8_t i = 0; i < 12; i++) {
-    if ((key & keys[i]) == 0) {
+  for (uint8_t i = 0; i < TOTAL_KEYS; i++) {
+    if ((key & keyMasks[i]) == 0) {
       return steps[i];
     }
   }
@@ -252,13 +370,38 @@ uint32_t readMatrix() {
 
 // function that matches the step size to the note
 const char * getNote(const uint16_t keys) {
-  for (int i = 0; i < 12; ++i)
+  for (int i = 0; i < TOTAL_KEYS; ++i)
   {
-    if ((keys & (1 << i)) == 0)
+    if ((keys & keyMasks[i]) == 0)
     {
       return notes[i];
     }
   }
   return notes[12];
 }
+
+
+void updateTxMessage(uint32_t currentState, uint32_t newState, Octave oct) {
+  if (currentState == newState) {
+    return;
+  } 
+
+  uint32_t currentKeyState, newKeyState;  
+
+  for ( auto i = 0; i < TOTAL_KEYS; ++i) {
+    currentKeyState = currentState & keyMasks[i];
+    newKeyState = newState & keyMasks[i];
+
+    if (currentKeyState != newKeyState) {
+      txMessages[0] = (newKeyState == 0) ? KEY_PRESSED : KEY_RELEASED;
+      txMessages[2] = i;
+      break;
+    } 
+
+  }
+
+  txMessages[1] = oct;   
+  return;
+}
+
 
