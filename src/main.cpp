@@ -49,6 +49,7 @@ const int HKOE_BIT = 6;
 #define KEY_RELEASED 0x52
 #define TOTAL_KEYS 12u
 #define MESSAGE_SIZE 8
+#define VOICES 12
 
 // Initiaion Intervals
 const TickType_t xStateUpdateFreq = 50/portTICK_PERIOD_MS; // 50ms Initiation Interval
@@ -268,7 +269,8 @@ void scanKeysTask(void * params) {
   uint32_t currentState = 0;
   uint32_t newState = 0;
   Octave oct;
-
+  uint32_t notesPressed[VOICES];
+  
   while (1)
   {
     vTaskDelayUntil(&xLastWakeTime, xStateUpdateFreq);
@@ -283,6 +285,10 @@ void scanKeysTask(void * params) {
     xQueueSend(msgOutQ, txMessages, portMAX_DELAY);
     stepValue = getStepSize(newState & KEY_MASK);
     __atomic_store_n(&step, stepValue, __ATOMIC_RELAXED);
+    for (int i = 0; i < VOICES; i++){
+
+    }
+
   }
 
 }
@@ -312,9 +318,11 @@ void transmitTask(void * params) {
 }
 
 
+
 // ----------------------------------------------------- // 
 // ----------------     Helpers    --------------------- // 
 // ----------------------------------------------------- //
+
 
 
 uint32_t getStepSize(uint16_t key) {
