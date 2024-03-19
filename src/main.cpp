@@ -7,6 +7,8 @@
 #include <cstdio>
 #include <sys/types.h>
 #include <ES_CAN.h>
+#include <iostream>
+#include <numeric>
 
 
 //Constants
@@ -75,6 +77,7 @@ QueueHandle_t msgInQ = xQueueCreate(36, MESSAGE_SIZE);
 QueueHandle_t msgOutQ = xQueueCreate(36, MESSAGE_SIZE);
 SemaphoreHandle_t txSemaphore = xSemaphoreCreateCounting(3,3);
 volatile uint32_t step = 0;
+volatile uint32_t stepArray[VOICES] = {0};
 
 // ISR's
 void sampleISR();
@@ -196,11 +199,17 @@ void setup() {
 
 void sampleISR()
 {
-  uint32_t currentStep = 0;
+  //uint32_t currentStep = 0;
   uint8_t volume;
-  __atomic_load(&step, &currentStep, __ATOMIC_RELAXED);
+  //__atomic_load(&step, &currentStep, __ATOMIC_RELAXED);
+  uint32_t phaseAccArray[VOICES] = {0};
   static uint32_t phaseAcc = 0;
-  phaseAcc += currentStep;
+  for (int i = 0; i < VOICES; i++){
+    uint32_t currentStep = (&stepArray[i], __ATOMIC_RELAXED);
+    phaseAccArray[i] += currentStep;
+  }
+  //phaseAcc += currentStep;
+  phaseAcc = std::accumulate(phaseAccArray, phaseAccArray + VOICES, 0) + phaseAcc;
   int32_t vout = (phaseAcc >> 24) - 128;
   volume = context.getVolume(); // Atmoc operation
   vout = vout >> (8 - volume);
@@ -261,6 +270,13 @@ void loop() {
 }
 
 
+void getStepSizes(uint16_t key) {
+  for (uint8_t i = 0; i < TOTAL_KEYS; i++) {
+    if ((key & keyMasks[i]) == 0) {
+       __atomic_store_n(&stepArray[i], steps[i], __ATOMIC_RELAXED);
+    }
+  }
+}
 
 void scanKeysTask(void * params) {
 
@@ -269,8 +285,9 @@ void scanKeysTask(void * params) {
   uint32_t currentState = 0;
   uint32_t newState = 0;
   Octave oct;
-  uint32_t notesPressed[VOICES];
-  
+  uint32_t noteArray[VOICES] = {0};
+  uint32_t curVoices = 0;
+
   while (1)
   {
     vTaskDelayUntil(&xLastWakeTime, xStateUpdateFreq);
@@ -283,12 +300,9 @@ void scanKeysTask(void * params) {
     context.unlock();
     updateTxMessage(currentState, newState, oct);
     xQueueSend(msgOutQ, txMessages, portMAX_DELAY);
-    stepValue = getStepSize(newState & KEY_MASK);
-    __atomic_store_n(&step, stepValue, __ATOMIC_RELAXED);
-    for (int i = 0; i < VOICES; i++){
-
-    }
-
+    // stepValue = getStepSize(newState & KEY_MASK);
+    // __atomic_store_n(&step, stepValue, __ATOMIC_RELAXED);
+    getStepSizes(newState & KEY_MASK);
   }
 
 }
@@ -333,6 +347,8 @@ uint32_t getStepSize(uint16_t key) {
   }
   return 0;
 }
+
+
 
 
 //Function to set outputs using key matrix
