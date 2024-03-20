@@ -1,12 +1,22 @@
-#include "wiring_time.h"
 #include <Arduino.h>
 #include <STM32FreeRTOS.h>
 #include <U8g2lib.h>
 #include <Context.hpp>
+#include <cassert>
 #include <cstdint>
 #include <cstdio>
 #include <sys/types.h>
 #include <ES_CAN.h>
+#include "reent.h"
+#include "stm32l432xx.h"
+#include "stm32l4xx_hal.h"
+#include "stm32l4xx_hal_dac.h"
+#include "stm32l4xx_hal_def.h"
+#include "stm32l4xx_hal_dma.h"
+#include "stm32l4xx_hal_gpio.h"
+#include "stm32l4xx_hal_rcc.h"
+#include "stm32l4xx_hal_tim.h"
+#include "wiring_time.h"
 #include <iostream>
 #include <numeric>
 
@@ -51,6 +61,7 @@ const int HKOE_BIT = 6;
 #define KEY_RELEASED 0x52
 #define TOTAL_KEYS 12u
 #define MESSAGE_SIZE 8
+#define L 64
 #define VOICES 12
 
 // Initiaion Intervals
@@ -94,7 +105,6 @@ TaskHandle_t scanKeysHandle = NULL;
 TaskHandle_t decodeTaskHandle = NULL;
 TaskHandle_t transmitTaskHandle = NULL;
 
-
 // Helpers
 uint32_t getStepSize(uint16_t key);
 void setOutMuxBit(const uint8_t bitIdx, const bool value);
@@ -104,6 +114,95 @@ void setRow (const uint8_t row);
 const char * getNote(const uint16_t keys);
 void serialPrintBuff(volatile uint8_t * buff);
 void updateTxMessage(uint32_t currentState, uint32_t newState, Octave oct);
+
+DMA_HandleTypeDef hdma;
+DAC_HandleTypeDef hdac;
+TIM_HandleTypeDef htim7;
+DAC_ChannelConfTypeDef sConfig;
+HAL_StatusTypeDef status;
+GPIO_InitTypeDef igpio;
+GPIO_TypeDef gpio;
+
+
+void printStatus (HAL_StatusTypeDef st, char * id) { 
+  printf("%s Status: %d\n", id,  status);
+}
+
+
+
+void initGPIO () { 
+  __HAL_RCC_GPIOA_CLK_ENABLE();
+  igpio.Pin = GPIO_PIN_4; 
+  igpio.Mode = GPIO_MODE_ANALOG;
+  igpio.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(&gpio, &igpio);
+}
+
+
+HAL_StatusTypeDef initDAC() { 
+  __HAL_RCC_DAC1_CLK_ENABLE();   
+  hdac.Instance = DAC1;
+  status = HAL_DAC_Init(&hdac);
+  if (status != HAL_OK)
+    printStatus(status, (char *)"DAC Init Error");
+  
+  sConfig = {0};
+  sConfig.DAC_SampleAndHold = DAC_SAMPLEANDHOLD_DISABLE; 
+  sConfig.DAC_Trigger = DAC_TRIGGER_T7_TRGO;
+  sConfig.DAC_OutputBuffer = DAC_OUTPUTBUFFER_ENABLE;
+  sConfig.DAC_ConnectOnChipPeripheral = DAC_CHIPCONNECT_DISABLE;
+  sConfig.DAC_UserTrimming = DAC_TRIMMING_FACTORY;
+
+  return HAL_DAC_ConfigChannel(&hdac, &sConfig, DAC_CHANNEL_1);
+
+}
+
+HAL_StatusTypeDef initDMA() { 
+  __HAL_RCC_DMA1_CLK_ENABLE();
+  hdma.Instance = DMA1_Channel3; 
+  hdma.Init.Request = DMA_REQUEST_6;
+  hdma.Init.Direction = DMA_MEMORY_TO_PERIPH;
+  hdma.Init.PeriphInc = DMA_PINC_DISABLE;
+  hdma.Init.MemInc = DMA_MINC_ENABLE;
+  hdma.Init.PeriphDataAlignment = DMA_PDATAALIGN_WORD;
+  hdma.Init.MemDataAlignment = DMA_MDATAALIGN_WORD;
+  hdma.Init.PeriphDataAlignment = DMA_MDATAALIGN_BYTE;
+  hdma.Init.Mode = DMA_CIRCULAR;
+  hdma.Init.Priority = DMA_PRIORITY_VERY_HIGH;
+  HAL_NVIC_SetPriority(DMA1_Channel3_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel3_IRQn);
+  NVIC_SetPriorityGrouping(0);
+  return HAL_DMA_Init(&hdma);
+}
+
+HAL_StatusTypeDef initTim7() { 
+  __HAL_RCC_TIM7_CLK_ENABLE();
+  TIM_MasterConfigTypeDef scfg = {0}; 
+
+  htim7.Instance = TIM7;
+  htim7.Init.Prescaler = 64-1; 
+  htim7.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim7.Init.Period = 45-1; 
+  htim7.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  HAL_StatusTypeDef tim_status = HAL_TIM_Base_Init(&htim7);
+  if (tim_status != HAL_OK)
+    printStatus(tim_status, (char *)"Timer Init Error");
+  
+  scfg.MasterOutputTrigger = TIM_TRGO_UPDATE;
+  scfg.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  tim_status = HAL_TIMEx_MasterConfigSynchronization(&htim7, &scfg);
+  if (tim_status!=HAL_OK)
+    printStatus(tim_status, (char *)"Attach Config To Timer Error");
+
+  return tim_status;
+}
+
+struct DataHandle { 
+  volatile uint8_t buff[L];
+  volatile uint8_t writeCounter;
+} typedef  DataHandle_t;
+
+DataHandle_t data;
 
 void setup() {
   //Set pin directions
@@ -122,6 +221,27 @@ void setup() {
   pinMode(JOYX_PIN, INPUT);
   pinMode(JOYY_PIN, INPUT);
 
+  //Initialise UART
+  Serial.begin(9600); 
+ 
+
+  // DMA 
+  status = HAL_Init();
+  printStatus(status, (char *) "HAL");
+  initGPIO();
+  status = initTim7();
+  assert(stats == HAL_OK);
+  printStatus(status, (char *) "TIM");
+  status = initDAC();
+  assert(status == HAL_OK);
+  printStatus(status, (char *) "DAC");
+  status = initDMA();
+  assert(status == HAL_OK);
+  printStatus(status, (char *) "DMA");
+  assert(status == HAL_OK);
+  __HAL_LINKDMA(&hdac, DMA_Handle1, hdma);
+   
+  
   //Initialise display
   setOutMuxBit(DRST_BIT, LOW);  //Assert display logic reset
   delayMicroseconds(2);
@@ -129,11 +249,6 @@ void setup() {
   u8g2.begin();
   setOutMuxBit(DEN_BIT, HIGH);  //Enable display power supply
 
-
-  //Initialise UART
-  Serial.begin(9600);
-  Serial.println("Hello World");
-  
   // Initialise CAN Bus
   CAN_Init(true);
   setCANFilter(0x123,0x7ff);
@@ -230,7 +345,6 @@ void sampleISR()
   vout = vout >> (8 - volume);
   analogWrite(OUTR_PIN, vout + 128);
 }
-
 
 
 void canRxISR (void) {
@@ -449,5 +563,6 @@ void updateTxMessage(uint32_t currentState, uint32_t newState, Octave oct) {
   txMessages[1] = oct;   
   return;
 }
+
 
 
