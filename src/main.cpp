@@ -108,7 +108,7 @@ void updateTxMessage(uint32_t currentState, uint32_t newState, Octave oct);
 
 void setup() {
   for (int i = 0; i < 255; i++) {
-  sine[i] = (int32_t)(127.0f * sin((i * 2 * PI) / 255.0f));
+  sine[i] = (int32_t)(127 * sin((i * 2 * PI) / 255));
   }
   //Set pin directions
   pinMode(RA0_PIN, OUTPUT);
@@ -195,7 +195,9 @@ void setup() {
 }
 
 int32_t genSine(int32_t x){//maclaurin
-  return (int32_t)(x - (x*x*x)/6 + (x*x*x*x*x)/120 - (x*x*x*x*x*x*x)/5040 + (x*x*x*x*x*x*x*x*x)/362880 - (x*x*x*x*x*x*x*x*x*x*x)/39916800) ;
+  return (int32_t)(x - (x*x*x)/6 + (x*x*x*x*x)/120 - (x*x*x*x*x*x*x)/5040 + 
+  (x*x*x*x*x*x*x*x*x)/362880 - (x*x*x*x*x*x*x*x*x*x*x)/39916800) + (x*x*x*x*x*x*x*x*x*x*x*x)/6227020800
+  - (x*x*x*x*x*x*x*x*x*x*x*x*x*x)/1307674368000;
   }
 
 int32_t genWaveform(uint32_t phaseAcc, uint8_t waveform){
@@ -206,8 +208,9 @@ int32_t genWaveform(uint32_t phaseAcc, uint8_t waveform){
     case 1: //square
       return scaled > 128 ?  127: -128;     
     case 2: //sine
-      return 128*genSine((int32_t)PI*(scaled-128)/128);//accurate range -pi to pi
-      //return sin((int32_t)PI*(scaled-128)/128)*128;
+      return scaled > 127 ? 128*genSine((int32_t)PI*(scaled-128)/128) : 127*genSine((int32_t)PI*(scaled-127)/127);//accurate range -pi to pi
+    case 3: //triangle
+      return scaled > 128 ? 255 - 2*scaled : 2*scaled - 255;
     default:
       return scaled - 128;
   }
@@ -236,8 +239,8 @@ void sampleISR()
     }
   }
   vout = vout/scaleDynamic;
-  // volume = context.getVolume(); // Atmoc operation
-  // vout = vout >> (8 - volume);
+  volume = context.getVolume(); // Atmoc operation
+  vout = vout >> (8 - volume);
   analogWrite(OUTR_PIN, vout + 128);
 }
 
@@ -264,32 +267,28 @@ void canTxISR (void) {
 void loop() {
   static uint32_t next = millis();
   static uint32_t count = 0;
-
   while (millis() < next);  //Wait for next interval
-
   next += interval;
-
   //Update display
   u8g2.clearBuffer();         // clear the internal memory
   u8g2.setFont(u8g2_font_ncenB08_tr); // choose a suitable font
   uint32_t copyState;
   uint8_t volume;
+  uint8_t waveform;
   context.lock(); 
   copyState = context.getState();
   volume = context.getVolume();
+  waveform = context.getWaveform();
   context.unlock();
   const char * note = getNote((uint16_t) copyState & KEY_MASK);
   //u8g2.drawStr(2, 20, note);
   u8g2.setCursor(2, 20);
-  u8g2.print((uint32_t) copyState, HEX);
-  //u8g2.setCursor(50, 20);
-  //u8g2.print(volume, HEX);
-  //u8g2.setCursor(60, 20);
-  //u8g2.print( (((uint16_t) txMessages[1]) << 8) + txMessages[0], HEX);
-  
+  u8g2.print(waveform, HEX);
+  u8g2.setCursor(50, 20);
+  u8g2.print(volume, HEX);
+  u8g2.setCursor(60, 20);
+  u8g2.print( (((uint16_t) txMessages[1]) << 8) + txMessages[0], HEX);
   u8g2.sendBuffer();          // transfer internal memory to the display
-
-  
   //Toggle LED
   digitalToggle(LED_BUILTIN);
 }
