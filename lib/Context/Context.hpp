@@ -10,6 +10,12 @@ enum Octave {
   Fourth = 4
 };
 
+// enum Waveform {
+//   sawtooth,
+//   square,
+//   sine
+// };
+
 
 // TODO: Add Octave for Handshake
 // For now Octave is Fixed
@@ -21,6 +27,7 @@ private:
     uint8_t _lowerLimit;
     uint8_t _upperLimit;
     Octave _octave;
+    uint8_t _waveform;
     
 
     
@@ -34,6 +41,7 @@ public:
     void lock();
     void unlock();
     void updateVolume(uint32_t newState);
+    void chooseWaveform(uint32_t newState);
     void setVolumeLimits(int lower, int upper);
 
     // Getters are defined as inline for atomic operation -> i.e no jump instruction to get a value,
@@ -41,6 +49,7 @@ public:
     inline uint8_t getVolume() { return _volume; };
     inline uint32_t getState() { return _state; };
     inline Octave getOctave() { return _octave; };
+    inline uint8_t getWaveform() { return _waveform; };
 
 };
 

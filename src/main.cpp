@@ -9,6 +9,7 @@
 #include <ES_CAN.h>
 #include <iostream>
 #include <numeric>
+#include <cmath>
 
 
 //Constants
@@ -65,7 +66,7 @@ U8G2_SSD1305_128X32_NONAME_F_HW_I2C u8g2(U8G2_R0);
 const uint32_t steps[12] = {49977801, 54113269, 57330981, 60740013, 64351885, 68178311, 72232370, 76527532, 81078245, 85899346,91007233, 96418697}; 
 const uint16_t keyMasks[12] = {0x1, 0x2, 0x4, 0x8, 0x10, 0x20, 0x40, 0x80, 0x100, 0x200, 0x400, 0x800};
 const char * notes[13] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B", "No Note"};
-
+int32_t sine[255] = {0};
 
 // TODO: Change Context to singleton as per instruction
 // Initialise Global Variables
@@ -106,6 +107,9 @@ void serialPrintBuff(volatile uint8_t * buff);
 void updateTxMessage(uint32_t currentState, uint32_t newState, Octave oct);
 
 void setup() {
+  for (int i = 0; i < 255; i++) {
+  sine[i] = (int32_t)(127.0f * sin((i * 2 * PI) / 255.0f));
+  }
   //Set pin directions
   pinMode(RA0_PIN, OUTPUT);
   pinMode(RA1_PIN, OUTPUT);
@@ -190,8 +194,24 @@ void setup() {
   vTaskStartScheduler(); 
 }
 
+int32_t genSine(int32_t x){//maclaurin
+  return (int32_t)(x - (x*x*x)/6 + (x*x*x*x*x)/120 - (x*x*x*x*x*x*x)/5040 + (x*x*x*x*x*x*x*x*x)/362880 - (x*x*x*x*x*x*x*x*x*x*x)/39916800) ;
+  }
 
-
+int32_t genWaveform(uint32_t phaseAcc, uint8_t waveform){
+  int32_t scaled = phaseAcc >> 24;
+  switch (waveform){
+    case 0:
+      return scaled - 128; //sawtooth
+    case 1: //square
+      return scaled > 128 ?  127: -128;     
+    case 2: //sine
+      return 128*genSine((int32_t)PI*(scaled-128)/128);//accurate range -pi to pi
+      //return sin((int32_t)PI*(scaled-128)/128)*128;
+    default:
+      return scaled - 128;
+  }
+}
 
 // ----------------------------------------------------- //
 // --------------------   ISR's    --------------------- //
@@ -202,32 +222,22 @@ void sampleISR()
   //uint32_t currentStep = 0;
   uint8_t volume;
   int32_t vout = 0;
+  uint8_t scaleDynamic = 1;
   //__atomic_load(&step, &currentStep, __ATOMIC_RELAXED);
   static uint32_t phaseAccArray[VOICES] = {0};
   static uint32_t phaseAcc = 0;
+  uint8_t waveform = context.getWaveform();
   for (int i = 0; i < VOICES; i++){
     uint32_t currentStep = __atomic_load_n(&stepArray[i], __ATOMIC_RELAXED);
     phaseAccArray[i] += currentStep;
     if (currentStep != 0){
-      vout += ((phaseAccArray[i] >> 24) - 128);
+      scaleDynamic += 1;
+      vout += genWaveform(phaseAccArray[i], waveform);
     }
   }
-  //phaseAcc += currentStep;
-  // for (int j = 0; j< VOICES; j++){
-  //   if 
-  //   vout += ((phaseAccArray[j] >> 24) - 128);
-  //   // if (phaseAccArray[j] != 0){
-  //   //   vout += ((phaseAccArray[j] >> 24) - 128);
-  //   // }else{
-  //   //   vout += 0;
-  //   // }  
-  // }
-  //phaseAcc += std::accumulate(phaseAccArray, phaseAccArray + VOICES, 0);
-  //int32_t vout = (phaseAcc >> 24) - 128;
-  //vout = std::accumulate(phaseAccArray, phaseAccArray + VOICES, 0);
-  vout = vout/VOICES;
-  volume = context.getVolume(); // Atmoc operation
-  vout = vout >> (8 - volume);
+  vout = vout/scaleDynamic;
+  // volume = context.getVolume(); // Atmoc operation
+  // vout = vout >> (8 - volume);
   analogWrite(OUTR_PIN, vout + 128);
 }
 
@@ -269,13 +279,13 @@ void loop() {
   volume = context.getVolume();
   context.unlock();
   const char * note = getNote((uint16_t) copyState & KEY_MASK);
-  u8g2.drawStr(2, 20, note);
-  u8g2.setCursor(90, 20);
-  u8g2.print((uint16_t) copyState, HEX);
-  u8g2.setCursor(50, 20);
-  u8g2.print(volume, HEX);
-  u8g2.setCursor(60, 20);
-  u8g2.print( (((uint16_t) txMessages[1]) << 8) + txMessages[0], HEX);
+  //u8g2.drawStr(2, 20, note);
+  u8g2.setCursor(2, 20);
+  u8g2.print((uint32_t) copyState, HEX);
+  //u8g2.setCursor(50, 20);
+  //u8g2.print(volume, HEX);
+  //u8g2.setCursor(60, 20);
+  //u8g2.print( (((uint16_t) txMessages[1]) << 8) + txMessages[0], HEX);
   
   u8g2.sendBuffer();          // transfer internal memory to the display
 
@@ -312,8 +322,10 @@ void scanKeysTask(void * params) {
     context.lock();
     currentState = context.getState();
     context.updateVolume(newState);
+    context.chooseWaveform(newState);
     context.setState(newState);
     oct = context.getOctave();
+    context.chooseWaveform(newState);
     context.unlock();
     updateTxMessage(currentState, newState, oct);
     xQueueSend(msgOutQ, txMessages, portMAX_DELAY);
@@ -369,7 +381,6 @@ uint32_t getStepSize(uint16_t key) {
   }
   return 0;
 }
-
 
 
 

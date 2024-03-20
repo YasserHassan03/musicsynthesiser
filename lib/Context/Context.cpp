@@ -3,7 +3,7 @@
 
 
 Context::Context()
-  :_state(0), _mutex(xSemaphoreCreateMutex()), _volume(0), _lowerLimit(0), _upperLimit(8), _octave(First)
+  :_state(0), _mutex(xSemaphoreCreateMutex()), _volume(0), _lowerLimit(0), _upperLimit(8), _octave(First), _waveform(0)
   {}
 
 Context::~Context() {
@@ -49,6 +49,37 @@ void Context::updateVolume(uint32_t newState)
     if (_volume > _lowerLimit)
     {
       _volume -= 1;
+    }
+  }
+}
+
+void Context::chooseWaveform(uint32_t newState)
+{
+  uint8_t previous_a = (_state & 0x1000) >> 12;
+  uint8_t previous_b = (_state & 0x2000) >> 13;
+  uint8_t a = (newState & 0x1000) >> 12;
+  uint8_t b = (newState & 0x2000) >> 13;
+
+  if ((previous_a == 0 && previous_b == 0 && a == 1 && b == 0) || (previous_a == 1 && previous_b == 1 && b == 1 && a == 0))
+  {
+    if (_waveform < 3)
+    {
+      _waveform ++;
+    }
+    else
+    {
+      _waveform = 0;
+    }
+  }
+  else if ((previous_a == 1 && previous_b == 0 && a == 0 && b == 0) || (previous_a == 0 && previous_b == 1 && b == 1 && a == 1))
+  {
+    if (_waveform > 0)
+    {
+      _waveform --;
+    }
+    else
+    {
+      _waveform = 3;
     }
   }
 }
