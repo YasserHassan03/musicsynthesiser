@@ -208,9 +208,10 @@ int32_t genWaveform(uint32_t phaseAcc, uint8_t waveform){
     case 1: //square
       return scaled > 128 ?  127: -128;     
     case 2: //sine
+      //return sine[scaled];
       return scaled > 127 ? 128*genSine((int32_t)PI*(scaled-128)/128) : 127*genSine((int32_t)PI*(scaled-127)/127);//accurate range -pi to pi
     case 3: //triangle
-      return scaled > 128 ? 255 - 2*scaled : 2*scaled - 255;
+      return scaled < 128 ? 127 - 2*scaled : -127 + 2*(scaled - 128);
     default:
       return scaled - 128;
   }
