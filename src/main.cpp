@@ -201,16 +201,18 @@ void sampleISR()
 {
   //uint32_t currentStep = 0;
   uint8_t volume;
+  //int32_t vout = 0;
   //__atomic_load(&step, &currentStep, __ATOMIC_RELAXED);
   uint32_t phaseAccArray[VOICES] = {0};
   static uint32_t phaseAcc = 0;
   for (int i = 0; i < VOICES; i++){
-    uint32_t currentStep = (&stepArray[i], __ATOMIC_RELAXED);
+    uint32_t currentStep = __atomic_load_n(&stepArray[i], __ATOMIC_RELAXED);
     phaseAccArray[i] += currentStep;
   }
   //phaseAcc += currentStep;
-  phaseAcc = std::accumulate(phaseAccArray, phaseAccArray + VOICES, 0) + phaseAcc;
+  phaseAcc += std::accumulate(phaseAccArray, phaseAccArray + VOICES, 0);
   int32_t vout = (phaseAcc >> 24) - 128;
+  vout = vout/VOICES;
   volume = context.getVolume(); // Atmoc operation
   vout = vout >> (8 - volume);
   analogWrite(OUTR_PIN, vout + 128);
@@ -274,6 +276,8 @@ void getStepSizes(uint16_t key) {
   for (uint8_t i = 0; i < TOTAL_KEYS; i++) {
     if ((key & keyMasks[i]) == 0) {
        __atomic_store_n(&stepArray[i], steps[i], __ATOMIC_RELAXED);
+    }else{
+      __atomic_store_n(&stepArray[i], 0, __ATOMIC_RELAXED);
     }
   }
 }
@@ -311,10 +315,16 @@ void scanKeysTask(void * params) {
 // Will wait portMAX_DELAY before continuing, hence portMAX_DELAY is the minimum Initiation interval
 void decodeTask(void * params) {
   
+  
   uint8_t rxMessage[8];
   
   while (1) {
     xQueueReceive(msgInQ, rxMessage, portMAX_DELAY); 
+    // TODO: Implement Mixer in order to respond to incoming messages
+    uint8_t octave = rxMessage[1];
+    uint8_t msgOut[8] = {octave};
+    xSemaphoreTake(txSemaphore, portMAX_DELAY);
+    CAN_TX(0x123, msgOut);
     // TODO: Implement Mixer in order to respond to incoming messages
   }
 }
