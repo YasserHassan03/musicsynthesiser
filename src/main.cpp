@@ -201,17 +201,30 @@ void sampleISR()
 {
   //uint32_t currentStep = 0;
   uint8_t volume;
-  //int32_t vout = 0;
+  int32_t vout = 0;
   //__atomic_load(&step, &currentStep, __ATOMIC_RELAXED);
-  uint32_t phaseAccArray[VOICES] = {0};
+  static uint32_t phaseAccArray[VOICES] = {0};
   static uint32_t phaseAcc = 0;
   for (int i = 0; i < VOICES; i++){
     uint32_t currentStep = __atomic_load_n(&stepArray[i], __ATOMIC_RELAXED);
     phaseAccArray[i] += currentStep;
+    if (currentStep != 0){
+      vout += ((phaseAccArray[i] >> 24) - 128);
+    }
   }
   //phaseAcc += currentStep;
-  phaseAcc += std::accumulate(phaseAccArray, phaseAccArray + VOICES, 0);
-  int32_t vout = (phaseAcc >> 24) - 128;
+  // for (int j = 0; j< VOICES; j++){
+  //   if 
+  //   vout += ((phaseAccArray[j] >> 24) - 128);
+  //   // if (phaseAccArray[j] != 0){
+  //   //   vout += ((phaseAccArray[j] >> 24) - 128);
+  //   // }else{
+  //   //   vout += 0;
+  //   // }  
+  // }
+  //phaseAcc += std::accumulate(phaseAccArray, phaseAccArray + VOICES, 0);
+  //int32_t vout = (phaseAcc >> 24) - 128;
+  //vout = std::accumulate(phaseAccArray, phaseAccArray + VOICES, 0);
   vout = vout/VOICES;
   volume = context.getVolume(); // Atmoc operation
   vout = vout >> (8 - volume);
@@ -346,7 +359,6 @@ void transmitTask(void * params) {
 // ----------------------------------------------------- // 
 // ----------------     Helpers    --------------------- // 
 // ----------------------------------------------------- //
-
 
 
 uint32_t getStepSize(uint16_t key) {
