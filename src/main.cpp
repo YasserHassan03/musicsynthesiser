@@ -71,6 +71,9 @@ const int HKOE_BIT = 6;
 #define WAVEFORM_MASK 0x2000000
 #define DISABLE_THREADS
 #define DISABLE_ISR
+// #define DISABLE_ISR 
+// #define DISABLE_THREADS 
+// #define TEST_SCANKEYS
 
 
 // Initiaion Intervals
@@ -352,8 +355,18 @@ void setup() {
   );
 
   // Start Scheduler
-  vTaskStartScheduler();
+  vTaskStartScheduler(); 
   #endif
+
+  #ifdef TEST_SCANKEYS
+  uint32_t startTime = micros();
+	for (int iter = 0; iter < 20; iter++) {
+		mixingTask(NULL);
+	}
+	Serial.println(micros()-startTime);
+	while(1);
+  #endif
+
 }
 
 
