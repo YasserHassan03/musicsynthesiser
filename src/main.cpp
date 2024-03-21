@@ -71,9 +71,7 @@ const int HKOE_BIT = 6;
 #define WAVEFORM_MASK 0x2000000
 #define DISABLE_THREADS
 #define DISABLE_ISR
-// #define DISABLE_ISR 
-// #define DISABLE_THREADS 
-// #define TEST_SCANKEYS
+#define TEST_SCANKEYS
 
 
 // Initiaion Intervals
@@ -360,8 +358,8 @@ void setup() {
 
   #ifdef TEST_SCANKEYS
   uint32_t startTime = micros();
-	for (int iter = 0; iter < 20; iter++) {
-		mixingTask(NULL);
+	for (int iter = 0; iter < 32; iter++) {
+		scanKeysTask(NULL);
 	}
 	Serial.println(micros()-startTime);
 	while(1);
@@ -921,14 +919,19 @@ void keyTxMessage(uint32_t newState, Octave oct) {
 void mixingTask(void * params) { 
   TickType_t xLastWakeTime = xTaskGetTickCount();
   uint32_t copyStateArray[4] = {0, 0, 0, 0};
-
+  Octave oct;
+  uint32_t state;
   #ifdef TEST_SCANKEYS
-    // context.lock();
-    context.setStateKey(context.getOctave(), context.getState() & KEY_MASK);
+    printf("Starting Mixing Task\n");
+    oct = context.getOctave();
+    state = context.getState();
+    
+    context.lock();
+    context.setStateKey(oct, state & KEY_MASK);
     for (int i = 0; i < 4; i++) { 
       copyStateArray[i] = context.getStateKey((Octave) i) & KEY_MASK;
     }
-    // context.unlock();
+    context.unlock();
     
     for (int j = 0; j < 3; j++ ) { 
       for (uint8_t i = 0; i < TOTAL_KEYS; i++) {
