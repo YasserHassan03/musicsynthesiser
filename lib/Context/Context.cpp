@@ -2,9 +2,8 @@
 #include <cstdint>
 
 
-
 Context::Context()
-  :_state(0), _mutex(xSemaphoreCreateMutex()), _volume(0), _lowerLimit(0), _upperLimit(8), _octave(First), _role(Receiver)
+  :_state(0), _mutex(xSemaphoreCreateMutex()), _volume(8), _lowerLimit(0), _upperLimit(8), _octave(First), _role(Receiver)
   {}
 
 Context::~Context() {
@@ -52,4 +51,9 @@ void Context::updateVolume(uint32_t newState)
       _volume -= 1;
     }
   }
+}
+
+
+void Context::inverseRole() { 
+  _role = (Role) !_role;
 }

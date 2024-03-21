@@ -53,12 +53,15 @@ const int HKOE_BIT = 6;
 
 // DEFINES 
 #define KEY_MASK 0xFFF
+#define RS_MASK 0x100000
 #define DAC_WRITE_FREQ 22000
 #define KEY_MESSAGE 0x50
 #define TOTAL_KEYS 12u
 #define MESSAGE_SIZE 8
 #define L 64
 #define VOICES 12
+#define SR_MESSAGE 0x98
+
 
 // Initiaion Intervals
 const TickType_t xStateUpdateFreq = 50/portTICK_PERIOD_MS; // 50ms Initiation Interval
@@ -77,6 +80,8 @@ const char * notes[13] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", 
 // TODO: Change Context to singleton as per instruction
 // Initialise Global Variables
 Context context = Context();
+TIM_TypeDef *Instance = TIM1;
+HardwareTimer *sampleTimer = new HardwareTimer(Instance);
 
 // TODO: Encapsulate txMessages, and rxMessages in a way that does not use alot of memory, and without dynamic memory allocation
 struct { 
@@ -99,13 +104,13 @@ void canTxISR();
 void scanKeysTask(void * params);
 void decodeTask(void * params);
 void transmitTask(void * params);
-void debugTask(void * params);
+void handShakeTask(void * params);
 
 // Task handles 
 TaskHandle_t scanKeysHandle = NULL;
 TaskHandle_t decodeTaskHandle = NULL;
 TaskHandle_t transmitTaskHandle = NULL;
-TaskHandle_t debugTaskHandle = NULL;
+TaskHandle_t handShakeTaskHandle = NULL;
 
 // Helpers
 uint32_t getStepSize(uint16_t key);
@@ -115,7 +120,8 @@ uint32_t readMatrix();
 void setRow (const uint8_t row);
 const char * getNote(const uint16_t keys);
 void serialPrintBuff(volatile uint8_t * buff);
-void updateTxMessage(uint32_t currentState, uint32_t newState, Octave oct);
+void keyTxMessage(uint32_t newState, Octave oct);
+void srTxMessage();
 
 DMA_HandleTypeDef hdma;
 DAC_HandleTypeDef hdac;
@@ -207,6 +213,7 @@ struct DataHandle {
 DataHandle_t data;
 
 void setup() {
+
   //Set pin directions
   pinMode(RA0_PIN, OUTPUT);
   pinMode(RA1_PIN, OUTPUT);
@@ -259,10 +266,8 @@ void setup() {
 
   // TODO: Repace with Ping Pong buffer + DMA
   // Initialise DAC ISR
+  sampleTimer->setOverflow(DAC_WRITE_FREQ, HERTZ_FORMAT);
   if (context.getRole() == Receiver) { 
-    TIM_TypeDef *Instance = TIM1;
-    HardwareTimer *sampleTimer = new HardwareTimer(Instance);
-    sampleTimer->setOverflow(DAC_WRITE_FREQ, HERTZ_FORMAT);
     sampleTimer->attachInterrupt(sampleISR);
     sampleTimer->resume();
   }
@@ -305,12 +310,12 @@ void setup() {
   );
   
   xTaskCreate ( 
-    debugTask,
+    handShakeTask,
     "debugTask",
     64, 
     NULL,
     1, 
-    &debugTaskHandle
+    &handShakeTaskHandle
   );
 
   // Start Scheduler
@@ -375,20 +380,29 @@ void loop() {
   u8g2.setFont(u8g2_font_ncenB08_tr); // choose a suitable font
   uint32_t copyState;
   uint8_t volume;
-  context.lock(); 
+  uint32_t role;
   copyState = context.getState();
+  role = context.getRole();
+  context.lock(); 
   volume = context.getVolume();
   context.unlock();
   const char * note = getNote((uint16_t) copyState & KEY_MASK);
-  u8g2.drawStr(2, 20, note);
-  u8g2.setCursor(90, 20);
-  u8g2.print((uint16_t) copyState, HEX);
-  u8g2.setCursor(50, 20);
+  u8g2.drawStr(2, 10, note);
+  u8g2.setCursor(2, 20);
+  u8g2.print(copyState, HEX);
+  u8g2.setCursor(50, 10);
   u8g2.print(volume, HEX);
-  u8g2.setCursor(60, 20);
-  u8g2.print( (((uint16_t) Message.txMessages[1]) << 8) + Message.txMessages[0], HEX);
-  
+  u8g2.setCursor(60, 10);
+  u8g2.drawStr(60, 10, (role == Sender) ? "S" : "R");
   u8g2.sendBuffer();          // transfer internal memory to the display
+  
+  if (context.getRole() == Receiver && !sampleTimer->hasInterrupt()) { 
+    sampleTimer->attachInterrupt(sampleISR);
+    sampleTimer->resume();
+  } else if (context.getRole() == Sender && sampleTimer->hasInterrupt()) { 
+    sampleTimer->detachInterrupt();
+    sampleTimer->resume();
+  } 
 
   
   //Toggle LED
@@ -428,8 +442,21 @@ void scanKeysTask(void * params) {
     context.unlock();
     
     if ((currentState & KEY_MASK) != (newState & KEY_MASK)) { 
-      updateTxMessage(currentState, newState, oct);
+      xSemaphoreTake(Message.txSemaphore, portMAX_DELAY);
+      keyTxMessage(newState, oct);
       xQueueSend(msgOutQ, Message.txMessages, portMAX_DELAY);
+      xSemaphoreGive(Message.txSemaphore);
+    }
+
+
+    if ((currentState & RS_MASK) && !(newState & RS_MASK)) { 
+      context.lock();
+      context.inverseRole();
+      xSemaphoreTake(Message.txSemaphore, portMAX_DELAY);
+      srTxMessage();
+      xQueueSend(msgOutQ, Message.txMessages, portMAX_DELAY);
+      xSemaphoreGive(Message.txSemaphore);
+      context.unlock();
     }
 
     getStepSizes(newState & KEY_MASK);
@@ -438,19 +465,30 @@ void scanKeysTask(void * params) {
 }
 
 
+void srTxMessage() { 
+  Message.txMessages[0] = SR_MESSAGE;
+}
+
+
+
 // Will wait portMAX_DELAY before continuing, hence portMAX_DELAY is the minimum Initiation interval
 void decodeTask(void * params) {
-  
   
   uint8_t rxMessage[8];
   
   while (1) {
     xQueueReceive(msgInQ, rxMessage, portMAX_DELAY); 
+    printf("msg Type= %x\n",  rxMessage[0]); 
     // TODO: Implement Mixer in order to respond to incoming messages
     if (rxMessage[0] == KEY_MESSAGE) { 
-      printf("stateRecieved = %x\n",  (rxMessage[2] << 8) + rxMessage[1]); 
-    } else { 
-
+    } else if (rxMessage[0] == SR_MESSAGE){ 
+      uint32_t role = context.getRole();
+      printf("role: %d\n", role);
+      if (role == Receiver) {
+        context.lock();
+        context.inverseRole();
+        context.unlock();
+      }
     }
   }
 }
@@ -540,7 +578,7 @@ const char * getNote(const uint16_t keys) {
 }
 
 
-void updateTxMessage(uint32_t currentState, uint32_t newState, Octave oct) {
+void keyTxMessage(uint32_t newState, Octave oct) {
   Message.txMessages[0] = KEY_MESSAGE; 
   Message.txMessages[1] = (uint8_t) (newState & KEY_MASK);
   Message.txMessages[2] = (uint8_t) (newState & KEY_MASK) >> 8;
@@ -549,8 +587,7 @@ void updateTxMessage(uint32_t currentState, uint32_t newState, Octave oct) {
 }
 
 
-
-void debugTask(void * params) { 
+void handShakeTask(void * params) { 
 
   TickType_t xLastWakeTime = xTaskGetTickCount();
   while(1) { 
