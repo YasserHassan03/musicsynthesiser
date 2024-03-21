@@ -796,7 +796,7 @@ std::string getNote(const uint16_t keys)
   {
     if (buildOrNah == 6)
       break;
-      
+
     if ((keys & keyMasks[i]) == 0)
     {
       if(buildOrNah == 0)
