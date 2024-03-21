@@ -323,14 +323,6 @@ void setup() {
     &transmitTaskHandle 
   );
   
-  // xTaskCreate ( 
-  //   handShakeTask,
-  //   "debugTask",
-  //   64, 
-  //   NULL,
-  //   1, 
-  //   &handShakeTaskHandle
-  // );
 
   // Start Scheduler
   vTaskStartScheduler(); 
@@ -616,6 +608,13 @@ void getStepSizes(uint16_t key)
   }
 }
 
+
+void sendTxMessage(uint32_t currentState, uint32_t newState) {
+  if (!((currentState & WEST_MASK) == WEST_MASK) || !((currentState & EAST_MASK) == EAST_MASK)) {
+    xQueueSend(msgOutQ, Message.txMessages, portMAX_DELAY);
+  }
+}
+
 void scanKeysTask(void *params)
 {
 
@@ -641,10 +640,10 @@ void scanKeysTask(void *params)
       xSemaphoreTake(Message.txSemaphore, portMAX_DELAY);
       keyTxMessage(newState, oct);
 
-      if (!((currentState & WEST_MASK) == WEST_MASK) || !((currentState & EAST_MASK) == EAST_MASK)) {
-        xQueueSend(msgOutQ, Message.txMessages, portMAX_DELAY);
+      if (context.getRole() == Sender) { 
+        sendTxMessage(currentState, newState);
       }
-      
+
       xSemaphoreGive(Message.txSemaphore);
     }
     
@@ -654,11 +653,7 @@ void scanKeysTask(void *params)
       context.unlock();
       xSemaphoreTake(Message.txSemaphore, portMAX_DELAY);
       srTxMessage();
-      
-      if (!((currentState & WEST_MASK) == WEST_MASK) || !((currentState & EAST_MASK) == EAST_MASK)) {
-        xQueueSend(msgOutQ, Message.txMessages, portMAX_DELAY);
-      }
-
+      sendTxMessage(currentState, newState);
       xSemaphoreGive(Message.txSemaphore);
     }
 
@@ -668,11 +663,7 @@ void scanKeysTask(void *params)
       context.unlock();
       xSemaphoreTake(Message.txSemaphore, portMAX_DELAY);
       waveTypeMessage();
-
-      if (!((currentState & WEST_MASK) == WEST_MASK) || !((currentState & EAST_MASK) == EAST_MASK)) {
-        xQueueSend(msgOutQ, Message.txMessages, portMAX_DELAY);
-      }
-
+      sendTxMessage(currentState, newState);
       xSemaphoreGive(Message.txSemaphore);
     }
 
@@ -696,13 +687,21 @@ void srTxMessage() {
 void decodeTask(void * params) {
   
   uint8_t rxMessage[8];
+  Octave oct;
+  uint16_t keyState;
   
   while (1) {
     xQueueReceive(msgInQ, rxMessage, portMAX_DELAY); 
     printf("msg Type= %x\n",  rxMessage[0]); 
 
-    if (rxMessage[0] == KEY_MESSAGE) { 
+    if (rxMessage[0] == KEY_MESSAGE && context.getRole() == Receiver) { 
       printf("keyState: %x\n", (((uint16_t) rxMessage[2]) << 8) | rxMessage[1]);
+      // oct = (Octave) rxMessage[3];
+      // keyState = (((uint16_t) rxMessage[2]) << 8) | rxMessage[1];
+
+      // context.lock();
+      // context.setNeighborState(oct, keyState);
+      // context.unlock();
       
     } else if (rxMessage[0] == SR_MESSAGE) { 
       uint32_t role = context.getRole();
