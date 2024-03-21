@@ -22,14 +22,14 @@ The minimum bound on the initiation interval can be calculated by setting the hi
 
 | Task          | Theoretical Minimum |
 |---------------|---------------------|
-| Sample ISR    |                     |
-| Transmit ISR  |                     |
-| Recieve ISR   |                     |
-| Transmit Task |                     |
-| ScanKeys task |                     |
-| Mixer Task    |                     |
-| Decode Task   |                     |
-| Display Task  |                     |
+| Sample ISR    |       18.17 ms              |
+| Transmit ISR  |        18.2ms             |
+| Recieve ISR   |     18.19ms                |
+| Transmit Task |     18.15ms                |
+| ScanKeys task |      18.11ms               |
+| Mixer Task    |     18.18ms                |
+| Decode Task   |     18.192ms                |
+| Display Task  |      18ms               |
 
 
 
