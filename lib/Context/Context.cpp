@@ -3,7 +3,7 @@
 
 
 Context::Context()
-  :_state(0), _mutex(xSemaphoreCreateMutex()), _volume(0), _lowerLimit(0), _upperLimit(8), _octave(First), _waveform(0)
+  :_state(0), _mutex(xSemaphoreCreateMutex()), _volume(0), _lowerLimit(0), _upperLimit(8), _octave(First), _waveform(0), _recording(false), _playback(false)
   {}
 
 Context::~Context() {
@@ -81,5 +81,23 @@ void Context::chooseWaveform(uint32_t newState)
     {
       _waveform = 3;
     }
+  }
+}
+
+void Context::updateRecording(uint32_t newState)
+{
+  uint8_t click = (newState & 0x200000) >> 21;
+  if (click == 0)//active low
+  {
+    _recording = !_recording;
+  }
+}
+
+void Context::updatePlayback(uint32_t newState)
+{
+  uint8_t click = (newState & 0x100000) >> 20;
+  if (click == 0)
+  {
+    _playback = !_playback;
   }
 }

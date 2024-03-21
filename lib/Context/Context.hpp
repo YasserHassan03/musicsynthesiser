@@ -28,6 +28,8 @@ private:
     uint8_t _upperLimit;
     Octave _octave;
     uint8_t _waveform;
+    bool _recording;
+    bool _playback;
     
 
     
@@ -43,6 +45,8 @@ public:
     void updateVolume(uint32_t newState);
     void chooseWaveform(uint32_t newState);
     void setVolumeLimits(int lower, int upper);
+    void updateRecording(uint32_t newState);
+    void updatePlayback(uint32_t newState);
 
     // Getters are defined as inline for atomic operation -> i.e no jump instruction to get a value,
     // The function call gets replaced with a ld instruction. This is so long as all our getters are <= 32 bits
@@ -50,7 +54,8 @@ public:
     inline uint32_t getState() { return _state; };
     inline Octave getOctave() { return _octave; };
     inline uint8_t getWaveform() { return _waveform; };
-
+    inline bool recordingState() { return _recording; };
+    inline bool playbackState() { return _playback; };
 };
 
 

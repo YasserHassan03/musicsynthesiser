@@ -8,6 +8,7 @@
 #include <sys/types.h>
 #include <ES_CAN.h>
 #include <iostream>
+#include <list>
 #include <numeric>
 #include <cmath>
 
@@ -79,7 +80,7 @@ QueueHandle_t msgOutQ = xQueueCreate(36, MESSAGE_SIZE);
 SemaphoreHandle_t txSemaphore = xSemaphoreCreateCounting(3,3);
 volatile uint32_t step = 0;
 volatile uint32_t stepArray[VOICES] = {0};
-
+std::vector<int32_t> recordVect ={};
 // ISR's
 void sampleISR();
 void canRxISR();
@@ -223,14 +224,14 @@ int32_t genWaveform(uint32_t phaseAcc, uint8_t waveform){
 
 void sampleISR()
 {
-  //uint32_t currentStep = 0;
   uint8_t volume;
   int32_t vout = 0;
   uint8_t scaleDynamic = 1;
-  //__atomic_load(&step, &currentStep, __ATOMIC_RELAXED);
   static uint32_t phaseAccArray[VOICES] = {0};
   static uint32_t phaseAcc = 0;
   uint8_t waveform = context.getWaveform();
+  bool recording = context.recordingState();
+  bool playback = context.playbackState();
   for (int i = 0; i < VOICES; i++){
     uint32_t currentStep = __atomic_load_n(&stepArray[i], __ATOMIC_RELAXED);
     phaseAccArray[i] += currentStep;
@@ -242,6 +243,13 @@ void sampleISR()
   vout = vout/scaleDynamic;
   volume = context.getVolume(); // Atmoc operation
   vout = vout >> (8 - volume);
+  // if (recording){
+  //    recordVect.push_back(vout);
+  // }
+  // if (playback){
+  //   vout = recordVect.front();
+  //   recordVect.pop_front();
+  // }
   analogWrite(OUTR_PIN, vout + 128);
 }
 
@@ -276,19 +284,24 @@ void loop() {
   uint32_t copyState;
   uint8_t volume;
   uint8_t waveform;
+  bool recording;
+  bool playback;
   context.lock(); 
   copyState = context.getState();
   volume = context.getVolume();
   waveform = context.getWaveform();
+  playback = context.playbackState();
+  recording = context.recordingState();
   context.unlock();
   const char * note = getNote((uint16_t) copyState & KEY_MASK);
   //u8g2.drawStr(2, 20, note);
   u8g2.setCursor(2, 20);
-  u8g2.print(waveform, HEX);
-  u8g2.setCursor(50, 20);
-  u8g2.print(volume, HEX);
+  u8g2.print(copyState, HEX);
   u8g2.setCursor(60, 20);
-  u8g2.print( (((uint16_t) txMessages[1]) << 8) + txMessages[0], HEX);
+  u8g2.print(playback, HEX);
+  u8g2.setCursor(70, 20);
+  u8g2.print(recording, HEX);
+  // u8g2.print( (((uint16_t) txMessages[1]) << 8) + txMessages[0], HEX);
   u8g2.sendBuffer();          // transfer internal memory to the display
   //Toggle LED
   digitalToggle(LED_BUILTIN);
@@ -307,13 +320,10 @@ void getStepSizes(uint16_t key) {
 
 void scanKeysTask(void * params) {
 
-  uint32_t stepValue = 0;
   TickType_t xLastWakeTime = xTaskGetTickCount();
   uint32_t currentState = 0;
   uint32_t newState = 0;
   Octave oct;
-  uint32_t noteArray[VOICES] = {0};
-  uint32_t curVoices = 0;
 
   while (1)
   {
@@ -326,11 +336,11 @@ void scanKeysTask(void * params) {
     context.setState(newState);
     oct = context.getOctave();
     context.chooseWaveform(newState);
+    context.updateRecording(newState);
+    context.updatePlayback(newState);
     context.unlock();
     updateTxMessage(currentState, newState, oct);
     xQueueSend(msgOutQ, txMessages, portMAX_DELAY);
-    // stepValue = getStepSize(newState & KEY_MASK);
-    // __atomic_store_n(&step, stepValue, __ATOMIC_RELAXED);
     getStepSizes(newState & KEY_MASK);
   }
 
