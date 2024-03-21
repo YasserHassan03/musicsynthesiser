@@ -4,7 +4,7 @@
 
 Context::Context()
   :_state(0), _mutex(xSemaphoreCreateMutex()), _volume(4), _lowerLimit(0), _upperLimit(8), 
-  _octave(First), _waveform(0), _Page(false), _role(Receiver), _stateKeys{0xfff, 0xfff, 0xfff, 0xfff}
+  _octave(Second), _waveform(0), _Page(false), _role(Receiver), _stateKeys{0xfff, 0xfff, 0xfff, 0xfff}
   {}
 
 Context::~Context() {

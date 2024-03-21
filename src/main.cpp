@@ -76,7 +76,8 @@ const int HKOE_BIT = 6;
 // Initiaion Intervals
 const TickType_t xStateUpdateFreq = 50/portTICK_PERIOD_MS; // 50ms Initiation Interval
 const TickType_t xMixUpdateFreq = 100/portTICK_PERIOD_MS; // 50ms Initiation Interval
-const TickType_t xDebugFreq = 2000/portTICK_PERIOD_MS;
+const TickType_t xTransmitFreq = 150/portTICK_PERIOD_MS; // 50ms Initiation Interval
+const TickType_t xDecodeFreq = 150/portTICK_PERIOD_MS; // 50ms Initiation Interval
 
 //Display driver object
 U8G2_SSD1305_128X32_NONAME_F_HW_I2C u8g2(U8G2_R0);
@@ -304,7 +305,7 @@ void setup() {
     "scanKeys",		/* Text name for the task */
     64,      		/* Stack size in words, not bytes */
     NULL,			/* Parameter passed into the task */
-    1,			/* Task priority */
+    0,			/* Task priority */
     &scanKeysHandle 
   ); 
 
@@ -315,7 +316,7 @@ void setup() {
     "decodeMsg",		/* Text name for the task */
     64,      		/* Stack size in words, not bytes */
     NULL,			/* Parameter passed into the task */
-    1,			/* Task priority */
+    2,			/* Task priority */
     &decodeTaskHandle 
   );
   
@@ -326,7 +327,7 @@ void setup() {
     "transmitTask",		/* Text name for the task */
     64,      		/* Stack size in words, not bytes */
     NULL,			/* Parameter passed into the task */
-    1,			/* Task priority */
+    2,			/* Task priority */
     &transmitTaskHandle 
   );
   
@@ -819,16 +820,6 @@ void keyTxMessage(uint32_t newState, Octave oct) {
   return;
 }
 
-
-void handShakeTask(void * params) { 
-
-  TickType_t xLastWakeTime = xTaskGetTickCount();
-  while(1) { 
-    vTaskDelayUntil(&xLastWakeTime, xDebugFreq);
-    
-  }
-  vTaskDelete(NULL);
-}
 
 void mixingTask(void * params) { 
   TickType_t xLastWakeTime = xTaskGetTickCount();
