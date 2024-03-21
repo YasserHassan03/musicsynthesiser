@@ -69,9 +69,8 @@ const int HKOE_BIT = 6;
 #define SR_MESSAGE 0x98
 #define WAVE_MESSAGE 0x99
 #define WAVEFORM_MASK 0x2000000
-// #define DISABLE_ISR 
-// #define DISABLE_THREADS 
-// #define TEST_SCANKEYS
+#define DISABLE_THREADS
+#define DISABLE_ISR
 
 
 // Initiaion Intervals
@@ -353,18 +352,8 @@ void setup() {
   );
 
   // Start Scheduler
-  vTaskStartScheduler(); 
+  vTaskStartScheduler();
   #endif
-
-  #ifdef TEST_SCANKEYS
-  uint32_t startTime = micros();
-	for (int iter = 0; iter < 20; iter++) {
-		mixingTask(NULL);
-	}
-	Serial.println(micros()-startTime);
-	while(1);
-  #endif
-
 }
 
 
@@ -549,13 +538,13 @@ void loop()
   pageToggle = context.getPage();
 
   const char * note = getNote((uint16_t) copyState & KEY_MASK);
-  u8g2.drawStr(2, 10, note);
-  u8g2.setCursor(2, 20);
-  u8g2.print(copyState, HEX);
-  u8g2.setCursor(50, 10);
-  u8g2.print(volume, HEX);
-  u8g2.setCursor(60, 10);
-  u8g2.drawStr(60, 10, (role == Sender) ? "S" : "R");
+  // u8g2.drawStr(2, 10, note);
+  // u8g2.setCursor(2, 20);
+  // u8g2.print(copyState, HEX);
+  // u8g2.setCursor(50, 10);
+  // u8g2.print(volume, HEX);
+  // u8g2.setCursor(60, 10);
+  // u8g2.drawStr(60, 10, (role == Sender) ? "S" : "R");
   
   if (context.getRole() == Receiver && !sampleTimer->hasInterrupt()) { 
     sampleTimer->attachInterrupt(sampleISR);
@@ -583,48 +572,50 @@ void loop()
     wavetype = "Triangle";
   }
 
-  u8g2.setCursor(2, 30);
-  u8g2.print(wavetype);
+  // u8g2.setCursor(2, 30);
+  // u8g2.print(wavetype);
 
-  // const char *note = getNote((uint16_t)copyState & KEY_MASK);
-  // if (!pageToggle)
-  // {
-  //   u8g2.setCursor(1, 10);
-  //   u8g2.print("Note: ");
-  //   u8g2.print(note);
-  //   u8g2.setCursor(2, 20);
-  //   u8g2.print("Wave: ");
-  //   u8g2.print(wavetype);
-  //   u8g2.setCursor(1, 30);
-  //   u8g2.print("Vol: ");
-  //   u8g2.print(volume, HEX);
-  //   u8g2.setCursor(40, 30);
-  //   u8g2.print("Oct: ");
-  //   u8g2.print(octave, HEX);
  
-  //   int y_flat = u8g2.getHeight() - (pitchBend - 0.45) * 15;
-  //   u8g2.drawFrame(u8g2.getWidth() - 10, u8g2.getHeight() -21, 10, 21);
-  //   u8g2.drawLine(u8g2.getWidth() - 10, y_flat, u8g2.getWidth(), y_flat);
-  // }
-  // else
-  // {
-  //   if (wavetype == "Sine")
-  //   {
-  //     drawSineWave();
-  //   }
-  //   else if (wavetype == "Square")
-  //   {
-  //     drawSquareWave();
-  //   }
-  //   else if (wavetype == "Sawtooth")
-  //   {
-  //     drawSawtoothWave();
-  //   }
-  //   else
-  //   {
-  //     drawTriangle();
-  //   }
-  // }
+  //const char *note = getNote((uint16_t)copyState & KEY_MASK);
+  if (!pageToggle)
+  {
+    u8g2.setCursor(1, 10);
+    u8g2.print("Note: ");
+    u8g2.print(note);
+    u8g2.setCursor(2, 20);
+    u8g2.print("Wave: ");
+    u8g2.print(wavetype);
+    u8g2.setCursor(3, 30);
+    u8g2.print("Vol: ");
+    u8g2.print(volume, HEX);
+    u8g2.setCursor(60, 30);
+    u8g2.print("Oct: ");
+    u8g2.print(octave, HEX);
+    u8g2.drawStr(100, 30, (role == Sender) ? "S" : "R");
+ 
+    int y_flat = u8g2.getHeight() - (pitchBend - 0.45) * 15;
+    u8g2.drawFrame(u8g2.getWidth() - 10, u8g2.getHeight() -21, 10, 21);
+    u8g2.drawLine(u8g2.getWidth() - 10, y_flat, u8g2.getWidth(), y_flat);
+  }
+  else
+  {
+    if (wavetype == "Sine")
+    {
+      drawSineWave();
+    }
+    else if (wavetype == "Square")
+    {
+      drawSquareWave();
+    }
+    else if (wavetype == "Sawtooth")
+    {
+      drawSawtoothWave();
+    }
+    else
+    {
+      drawTriangle();
+    }
+  }
 
   u8g2.sendBuffer(); // transfer internal memory to the display
   
@@ -906,15 +897,6 @@ void keyTxMessage(uint32_t newState, Octave oct) {
 }
 
 
-void handShakeTask(void * params) { 
-
-  TickType_t xLastWakeTime = xTaskGetTickCount();
-  while(1) { 
-    vTaskDelayUntil(&xLastWakeTime, xDebugFreq);
-    
-  }
-  vTaskDelete(NULL);
-}
 
 void mixingTask(void * params) { 
   TickType_t xLastWakeTime = xTaskGetTickCount();
