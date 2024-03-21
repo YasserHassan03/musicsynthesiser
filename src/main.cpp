@@ -7,6 +7,9 @@
 #include <cstdio>
 #include <sys/types.h>
 #include <ES_CAN.h>
+#include <iostream>
+#include <numeric>
+#include <cmath>
 
 // Constants
 const uint32_t interval = 100; // Display update interval
@@ -47,6 +50,7 @@ const int HKOE_BIT = 6;
 #define KEY_RELEASED 0x52
 #define TOTAL_KEYS 12u
 #define MESSAGE_SIZE 8
+#define VOICES 12
 
 // Initiaion Intervals
 const TickType_t xStateUpdateFreq = 50 / portTICK_PERIOD_MS; // 50ms Initiation Interval
@@ -58,6 +62,7 @@ U8G2_SSD1305_128X32_NONAME_F_HW_I2C u8g2(U8G2_R0);
 const uint32_t steps[12] = {49977801, 54113269, 57330981, 60740013, 64351885, 68178311, 72232370, 76527532, 81078245, 85899346, 91007233, 96418697};
 const uint16_t keyMasks[12] = {0x1, 0x2, 0x4, 0x8, 0x10, 0x20, 0x40, 0x80, 0x100, 0x200, 0x400, 0x800};
 const char *notes[13] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B", "No Note"};
+int32_t sine[255] = {0};
 
 // TODO: Change Context to singleton as per instruction
 // Initialise Global Variables
@@ -69,6 +74,7 @@ QueueHandle_t msgInQ = xQueueCreate(36, MESSAGE_SIZE);
 QueueHandle_t msgOutQ = xQueueCreate(36, MESSAGE_SIZE);
 SemaphoreHandle_t txSemaphore = xSemaphoreCreateCounting(3, 3);
 volatile uint32_t step = 0;
+volatile uint32_t stepArray[VOICES] = {0};
 
 // ISR's
 void sampleISR();
@@ -97,6 +103,10 @@ void updateTxMessage(uint32_t currentState, uint32_t newState, Octave oct);
 
 void setup()
 {
+  for (int i = 0; i < 255; i++)
+  {
+    sine[i] = (int32_t)(127 * sin((i * 2 * PI) / 255));
+  }
   // Set pin directions
   pinMode(RA0_PIN, OUTPUT);
   pinMode(RA1_PIN, OUTPUT);
@@ -172,18 +182,57 @@ void setup()
   vTaskStartScheduler();
 }
 
+int32_t genSine(int32_t x)
+{ // maclaurin
+  return (int32_t)(x - (x * x * x) / 6 + (x * x * x * x * x) / 120 - (x * x * x * x * x * x * x) / 5040 +
+                   (x * x * x * x * x * x * x * x * x) / 362880 - (x * x * x * x * x * x * x * x * x * x * x) / 39916800) +
+         (x * x * x * x * x * x * x * x * x * x * x * x) / 6227020800 - (x * x * x * x * x * x * x * x * x * x * x * x * x * x) / 1307674368000;
+}
+
+int32_t genWaveform(uint32_t phaseAcc, uint8_t waveform)
+{
+  int32_t scaled = phaseAcc >> 24;
+  switch (waveform)
+  {
+  case 0:
+    return scaled - 128; // sawtooth
+  case 1:                // square
+    return scaled > 128 ? 127 : -128;
+  case 2: // sine
+    // return sine[scaled];
+    return scaled > 127 ? 128 * genSine((int32_t)PI * (scaled - 128) / 128) : 127 * genSine((int32_t)PI * (scaled - 127) / 127); // accurate range -pi to pi
+  case 3:                                                                                                                        // triangle
+    return scaled < 128 ? 127 - 2 * scaled : -127 + 2 * (scaled - 128);
+  default:
+    return scaled - 128;
+  }
+}
+
 // ----------------------------------------------------- //
 // --------------------   ISR's    --------------------- //
 // ----------------------------------------------------- //
 
 void sampleISR()
 {
-  uint32_t currentStep = 0;
+  // uint32_t currentStep = 0;
   uint8_t volume;
-  __atomic_load(&step, &currentStep, __ATOMIC_RELAXED);
+  int32_t vout = 0;
+  uint8_t scaleDynamic = 1;
+  //__atomic_load(&step, &currentStep, __ATOMIC_RELAXED);
+  static uint32_t phaseAccArray[VOICES] = {0};
   static uint32_t phaseAcc = 0;
-  phaseAcc += currentStep;
-  int32_t vout = (phaseAcc >> 24) - 128;
+  uint8_t waveform = context.getWaveform();
+  for (int i = 0; i < VOICES; i++)
+  {
+    uint32_t currentStep = __atomic_load_n(&stepArray[i], __ATOMIC_RELAXED);
+    phaseAccArray[i] += currentStep;
+    if (currentStep != 0)
+    {
+      scaleDynamic += 1;
+      vout += genWaveform(phaseAccArray[i], waveform);
+    }
+  }
+  vout = vout / scaleDynamic;
   volume = context.getVolume(); // Atmoc operation
   vout = vout >> (8 - volume);
   analogWrite(OUTR_PIN, vout + 128);
@@ -206,39 +255,169 @@ void canTxISR(void)
 // --------------------   Tasks    --------------------- //
 // ----------------------------------------------------- //
 
+
+void drawSineWave() {
+  const int numPoints = 128;
+  const int amplitude = 10;
+  const int frequency = 2;
+  const float phaseShift = 0.1;
+  float phaseIncrement = TWO_PI / numPoints * frequency;
+  for (int i = 0; i < numPoints; i++) {
+    float x = map(i, 0, numPoints, 0, u8g2.getDisplayWidth());
+    float y = amplitude * sin(i * phaseIncrement + phaseShift) + u8g2.getDisplayHeight() / 2;
+    u8g2.drawPixel(x, y);
+  }
+}
+
+int square(float val) {
+  if (val >= 0 && val <= PI) {
+    return 1;
+  } else {
+    return -1;
+  }
+}
+void drawSquareWave() {
+  const int numPoints = 128;
+  const int amplitude = 10;
+  const int frequency = 2;
+  const float phaseShift = 0.1;
+  float phaseIncrement = TWO_PI / numPoints * frequency;
+  bool high = false; 
+  float previousY = 0; 
+
+  for (int i = 0; i < numPoints; i++) {
+    float x = map(i, 0, numPoints, 0, u8g2.getDisplayWidth());
+    if (i % (numPoints / frequency) == 0) {
+      high = !high;
+    }
+    float y;
+    if (high) {
+      y = amplitude + u8g2.getDisplayHeight() / 2;
+    } else {
+      y = -amplitude + u8g2.getDisplayHeight() / 2;
+    }
+    u8g2.drawLine(x - 1, previousY, x, y);
+    previousY = y; 
+  }
+}
+
+void drawSawtoothWave() {
+  const int numPoints = 128;
+  const int amplitude = 10;
+  const int frequency = 2;
+  const float phaseShift = 0.1;
+  float phaseIncrement = TWO_PI / numPoints * frequency;
+  float prevX, prevY;
+  for (int i = 0; i < numPoints; i++) {
+    float x = map(i, 0, numPoints, 0, u8g2.getDisplayWidth());
+    float y = amplitude * ((i * phaseIncrement + phaseShift) - floor(i * phaseIncrement + phaseShift)) + u8g2.getDisplayHeight() / 2;
+    if (i > 0) {
+      u8g2.drawLine(prevX, prevY, x, y);
+    }
+    prevX = x;
+    prevY = y;
+  }
+}
+
+
+void drawTriangle() {
+  // Draw the triangle wave
+  for (int x = 0; x < 128; x++) {
+    int y = abs((x % 64) - 64 / 2) * 2 * 15 / 64  + 10;
+    u8g2.drawPixel(x, y);
+  }
+}
+
+
+
 // Display Task
 void loop()
 {
   static uint32_t next = millis();
   static uint32_t count = 0;
-
   while (millis() < next)
     ; // Wait for next interval
-
   next += interval;
-
   // Update display
   u8g2.clearBuffer();                 // clear the internal memory
   u8g2.setFont(u8g2_font_ncenB08_tr); // choose a suitable font
   uint32_t copyState;
   uint8_t volume;
+  uint8_t waveform;
+  const char *wavetype;
   context.lock();
   copyState = context.getState();
   volume = context.getVolume();
+  Octave octave = context.getOctave();
+  waveform = context.getWaveform();
+
+  if (waveform == 0x0)
+  {
+    wavetype = "Sawtooth";
+
+  }
+  else if (waveform == 0x1)
+  {
+    wavetype = "Square";
+  }
+  else if (waveform == 0x2)
+  {
+    wavetype = "Sine";
+
+  }
+  else
+  {
+    wavetype = "Triangle";
+  }
   context.unlock();
   const char *note = getNote((uint16_t)copyState & KEY_MASK);
-  u8g2.drawStr(2, 20, note);
-  u8g2.setCursor(90, 20);
-  u8g2.print((uint16_t)copyState, HEX);
-  u8g2.setCursor(50, 20);
-  u8g2.print(volume, HEX);
-  u8g2.setCursor(60, 20);
-  u8g2.print((((uint16_t)txMessages[1]) << 8) + txMessages[0], HEX);
+  if (analogRead(JOYY_PIN) >= 500 && analogRead(JOYY_PIN) <= 530)
+  {
+    u8g2.setCursor(1, 10);
+    u8g2.print("Note: ");
+    u8g2.print(note);
+    u8g2.setCursor(2, 20);
+    u8g2.print("Wave: ");
+    u8g2.print(wavetype);
+    u8g2.setCursor(1, 30);
+    u8g2.print("Vol: ");
+    u8g2.print(volume, HEX);
+    u8g2.setCursor(70, 30);
+    u8g2.print("Oct: ");
+    u8g2.print(octave, HEX);
+  }
+  else
+  {
+    if (wavetype == "Sine"){
+      drawSineWave();
+    } else if (wavetype == "Square"){  
+      drawSquareWave();
+    }else if (wavetype == "Sawtooth"){
+      drawSawtoothWave();
+    }else{
+      drawTriangle();
+    } 
+  
+  }
 
   u8g2.sendBuffer(); // transfer internal memory to the display
-
   // Toggle LED
   digitalToggle(LED_BUILTIN);
+}
+
+void getStepSizes(uint16_t key)
+{
+  for (uint8_t i = 0; i < TOTAL_KEYS; i++)
+  {
+    if ((key & keyMasks[i]) == 0)
+    {
+      __atomic_store_n(&stepArray[i], steps[i], __ATOMIC_RELAXED);
+    }
+    else
+    {
+      __atomic_store_n(&stepArray[i], 0, __ATOMIC_RELAXED);
+    }
+  }
 }
 
 void scanKeysTask(void *params)
@@ -249,9 +428,8 @@ void scanKeysTask(void *params)
   uint32_t currentState = 0;
   uint32_t newState = 0;
   Octave oct;
-  bool outputhandshakepin = true;
-  int pos = 0;
-  boolean highesthandshake = false;
+  uint32_t noteArray[VOICES] = {0};
+  uint32_t curVoices = 0;
 
   while (1)
   {
@@ -260,47 +438,16 @@ void scanKeysTask(void *params)
     context.lock();
     currentState = context.getState();
     context.updateVolume(newState);
+    context.chooseWaveform(newState);
     context.setState(newState);
     oct = context.getOctave();
+    context.chooseWaveform(newState);
     context.unlock();
     updateTxMessage(currentState, newState, oct);
     xQueueSend(msgOutQ, txMessages, portMAX_DELAY);
-    stepValue = getStepSize(newState & KEY_MASK);
-    __atomic_store_n(&step, stepValue, __ATOMIC_RELAXED);
-
-    // select row 5 column 3 and set to west handshake pin set to high
-    setRow(5);
-    digitalWrite(OUT_PIN, outputhandshakepin); 
-    digitalWrite(REN_PIN, 1);          
-    delayMicroseconds(3);              
-    boolean westHSPin = (readCols() && (1 << 3));        
-    digitalWrite(REN_PIN, 0);
-    // select row 6 column 3 and set to east handshake pin set to output handhsake pin
-    setRow(6);
-    digitalWrite(OUT_PIN, outputhandshakepin); 
-    digitalWrite(REN_PIN, 1);          
-    delayMicroseconds(3);              
-    boolean eastHSPin = (readCols() && (1 << 3));         
-    digitalWrite(REN_PIN, 0);
-
-    if (westHSPin && eastHSPin && (pos = 0)) // check if it s first loop instead of a 0
-    {
-      //set octave to 4 
-      //set octaves somehow using some maths? limited between 1 & 7
-    }
-    else if (!westHSPin && eastHSPin){
-      highesthandshake = true;
-    }
-    if(westHSPin && eastHSPin && highesthandshake){
-      pos = pos +1;
-      //send message to the other boards saying handhsake is done and this is the highest postion acheived. needed for calculating octaves
-      //assign ocatves
-    }
-    else if (westHSPin && !eastHSPin && outputhandshakepin){
-      // send message with pos + 1 to indicate new handshake
-      outputhandshakepin = false; // have a way of checking if handshake has already been sent to the board decodec block so make pos global
-    }
-//might struggle with delays between boards and no method to add new board right now and stoppping the handshake ( set all outputs to high)
+    // stepValue = getStepSize(newState & KEY_MASK);
+    // __atomic_store_n(&step, stepValue, __ATOMIC_RELAXED);
+    getStepSizes(newState & KEY_MASK);
   }
 }
 
@@ -313,6 +460,11 @@ void decodeTask(void *params)
   while (1)
   {
     xQueueReceive(msgInQ, rxMessage, portMAX_DELAY);
+    // TODO: Implement Mixer in order to respond to incoming messages
+    uint8_t octave = rxMessage[1];
+    uint8_t msgOut[8] = {octave};
+    xSemaphoreTake(txSemaphore, portMAX_DELAY);
+    CAN_TX(0x123, msgOut);
     // TODO: Implement Mixer in order to respond to incoming messages
   }
 }
