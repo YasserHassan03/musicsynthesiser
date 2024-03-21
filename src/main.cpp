@@ -53,6 +53,8 @@ const int HKOE_BIT = 6;
 
 // DEFINES 
 #define KEY_MASK 0xFFF
+#define WEST_MASK 0x800000
+#define EAST_MASK 0x8000000
 #define RS_MASK 0x100000
 #define DAC_WRITE_FREQ 22000
 #define KEY_MESSAGE 0x50
@@ -309,14 +311,14 @@ void setup() {
     &transmitTaskHandle 
   );
   
-  xTaskCreate ( 
-    handShakeTask,
-    "debugTask",
-    64, 
-    NULL,
-    1, 
-    &handShakeTaskHandle
-  );
+  // xTaskCreate ( 
+  //   handShakeTask,
+  //   "debugTask",
+  //   64, 
+  //   NULL,
+  //   1, 
+  //   &handShakeTaskHandle
+  // );
 
   // Start Scheduler
   vTaskStartScheduler(); 
@@ -429,6 +431,10 @@ void scanKeysTask(void * params) {
   Octave oct;
   uint32_t noteArray[VOICES] = {0};
   uint32_t curVoices = 0;
+  uint8_t currentConnection;
+  uint8_t newConnection;
+  uint8_t westPin;
+  uint8_t eastPin;
 
   while (1)
   {
@@ -441,22 +447,29 @@ void scanKeysTask(void * params) {
     oct = context.getOctave();
     context.unlock();
     
-    if ((currentState & KEY_MASK) != (newState & KEY_MASK)) { 
+    if ((currentState & KEY_MASK) != (newState & KEY_MASK)) {
       xSemaphoreTake(Message.txSemaphore, portMAX_DELAY);
       keyTxMessage(newState, oct);
-      xQueueSend(msgOutQ, Message.txMessages, portMAX_DELAY);
+
+      if (!((currentState & WEST_MASK) == WEST_MASK) || !((currentState & EAST_MASK) == EAST_MASK)) {
+        xQueueSend(msgOutQ, Message.txMessages, portMAX_DELAY);
+      }
+      
       xSemaphoreGive(Message.txSemaphore);
     }
-
-
+    
     if ((currentState & RS_MASK) && !(newState & RS_MASK)) { 
       context.lock();
       context.inverseRole();
+      context.unlock();
       xSemaphoreTake(Message.txSemaphore, portMAX_DELAY);
       srTxMessage();
-      xQueueSend(msgOutQ, Message.txMessages, portMAX_DELAY);
+      
+      if (!((currentState & WEST_MASK) == WEST_MASK) || !((currentState & EAST_MASK) == EAST_MASK)) {
+        xQueueSend(msgOutQ, Message.txMessages, portMAX_DELAY);
+      }
+
       xSemaphoreGive(Message.txSemaphore);
-      context.unlock();
     }
 
     getStepSizes(newState & KEY_MASK);
@@ -596,4 +609,5 @@ void handShakeTask(void * params) {
     vTaskDelayUntil(&xLastWakeTime, xDebugFreq);
     
   }
+  vTaskDelete(NULL);
 }

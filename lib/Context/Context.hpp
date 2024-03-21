@@ -43,8 +43,8 @@ public:
     void updateVolume(uint32_t newState);
     void setVolumeLimits(int lower, int upper);
     void inverseRole();
+    void setOctave(Octave octave);
     
-
 
     // Getters are defined as inline for atomic operation -> i.e no jump instruction to get a value,
     // The function call gets replaced with a ld instruction. This is so long as all our getters are <= 32 bits

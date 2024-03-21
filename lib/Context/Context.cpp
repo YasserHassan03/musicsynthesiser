@@ -54,6 +54,13 @@ void Context::updateVolume(uint32_t newState)
 }
 
 
+
 void Context::inverseRole() { 
   _role = (Role) !_role;
 }
+
+
+void Context::setOctave(Octave octave) {
+  _octave = octave;
+}
+
