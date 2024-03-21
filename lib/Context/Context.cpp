@@ -67,11 +67,13 @@ void Context::setOctave(Octave octave) {
 }
 
 
-
-
 void Context::updatePage(uint32_t newState)
 {
-  _Page = !_Page;
+  uint8_t click = (newState & 0x200000) >> 21;
+  if (click == 0)//active low
+  {
+    _Page = !_Page;
+  }
 }
 
 void Context::setNextWaveForm(uint32_t newState)
