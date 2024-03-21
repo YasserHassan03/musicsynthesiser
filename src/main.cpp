@@ -359,7 +359,7 @@ void setup() {
   #ifdef TEST_SCANKEYS
   uint32_t startTime = micros();
 	for (int iter = 0; iter < 32; iter++) {
-		scanKeysTask(NULL);
+		//placeholder
 	}
 	Serial.println(micros()-startTime);
 	while(1);
@@ -430,7 +430,7 @@ void sampleISR()
 void canRxISR (void) {
 	uint8_t rxMessages[8];
 	uint32_t ID;
-	CAN_RX(ID, rxMessages);
+	// CAN_RX(ID, rxMessages);
 	xQueueSendFromISR(msgInQ, rxMessages, NULL);
 }
 
@@ -523,6 +523,108 @@ void drawTriangle()
 // Display Task
 void loop()
 {
+  #ifdef TEST_SCANKEYS
+  u8g2.clearBuffer();                 // clear the internal memory
+  u8g2.setFont(u8g2_font_ncenB08_tr); // choose a suitable font
+  uint32_t copyState;
+  uint8_t volume;
+  uint16_t y = analogRead(JOYY_PIN);
+  uint32_t role;
+  __atomic_store_n(&yAxis, analogRead(JOYY_PIN), __ATOMIC_RELAXED);
+  float pitchBend = (float)y > 554 ? 2 - (float)y / 555 : 1 + (554 - (float)y) / 555;
+  uint8_t waveform;
+  bool pageToggle;
+  bool playback;
+  copyState = context.getState();
+  role = context.getRole();
+  context.lock();
+  volume = context.getVolume();
+  context.unlock();
+  Octave octave = context.getOctave();
+  waveform = context.getWaveform();
+  pageToggle = context.getPage();
+
+  std::string note = getNote((uint16_t) copyState & KEY_MASK);
+  // u8g2.drawStr(2, 10, note);
+  // u8g2.setCursor(2, 20);
+  // u8g2.print(copyState, HEX);
+  // u8g2.setCursor(50, 10);
+  // u8g2.print(volume, HEX);
+  // u8g2.setCursor(60, 10);
+  // u8g2.drawStr(60, 10, (role == Sender) ? "S" : "R");
+  
+  if (context.getRole() == Receiver && !sampleTimer->hasInterrupt()) { 
+    sampleTimer->attachInterrupt(sampleISR);
+    sampleTimer->resume();
+  } else if (context.getRole() == Sender && sampleTimer->hasInterrupt()) { 
+    sampleTimer->detachInterrupt();
+    sampleTimer->resume();
+  } 
+
+  const char *wavetype;
+  if (waveform == 0x0)
+  {
+    wavetype = "Sawtooth";
+  }
+  else if (waveform == 0x1)
+  {
+    wavetype = "Square";
+  }
+  else if (waveform == 0x2)
+  {
+    wavetype = "Sine";
+  }
+  else
+  {
+    wavetype = "Triangle";
+  }
+
+
+  if (!pageToggle)
+  {
+    u8g2.setCursor(1, 10);
+    u8g2.print("Note: ");
+    u8g2.print(note.c_str());
+    u8g2.setCursor(2, 20);
+    u8g2.print("Wave: ");
+    u8g2.print(wavetype);
+    u8g2.setCursor(3, 30);
+    u8g2.print("Vol: ");
+    u8g2.print(volume, HEX);
+    u8g2.setCursor(60, 30);
+    u8g2.print("Oct: ");
+    u8g2.print(octave, HEX);
+    u8g2.drawStr(100, 30, (role == Sender) ? "S" : "R");
+ 
+    int y_flat = u8g2.getHeight() - (pitchBend - 0.45) * 15;
+    u8g2.drawFrame(u8g2.getWidth() - 10, u8g2.getHeight() -21, 10, 21);
+    u8g2.drawLine(u8g2.getWidth() - 10, y_flat, u8g2.getWidth(), y_flat);
+  }
+  else
+  {
+    if (wavetype == "Sine")
+    {
+      drawSineWave();
+    }
+    else if (wavetype == "Square")
+    {
+      drawSquareWave();
+    }
+    else if (wavetype == "Sawtooth")
+    {
+      drawSawtoothWave();
+    }
+    else
+    {
+      drawTriangle();
+    }
+  }
+
+  u8g2.sendBuffer(); // transfer internal memory to the display
+  
+  // Toggle LED
+  digitalToggle(LED_BUILTIN);
+  #else
   static uint32_t next = millis();
   static uint32_t count = 0;
   while (millis() < next); // Wait for next interval
@@ -628,6 +730,7 @@ void loop()
   
   // Toggle LED
   digitalToggle(LED_BUILTIN);
+  #endif
 }
 
 
@@ -922,7 +1025,7 @@ void mixingTask(void * params) {
   Octave oct;
   uint32_t state;
   #ifdef TEST_SCANKEYS
-    printf("Starting Mixing Task\n");
+    // printf("Starting Mixing Task\n");
     oct = context.getOctave();
     state = context.getState();
     
@@ -933,7 +1036,7 @@ void mixingTask(void * params) {
     }
     context.unlock();
     
-    for (int j = 0; j < 3; j++ ) { 
+    for (int j = 0; j < 2; j++ ) { 
       for (uint8_t i = 0; i < TOTAL_KEYS; i++) {
         if ((copyStateArray[j] & keyMasks[i]) == 0) {
           __atomic_store_n(&StepData.stepArray[j * VOICES_PER_BOARD + i], steps[i] << j, __ATOMIC_RELAXED);
