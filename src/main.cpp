@@ -690,8 +690,10 @@ void decodeTask(void * params) {
   uint8_t rxMessage[8];
   Octave oct;
   uint16_t keyState;
+  TickType_t xLastWakeTime = xTaskGetTickCount();
   
   while (1) {
+    vTaskDelayUntil(&xLastWakeTime, xDecodeFreq);
     xQueueReceive(msgInQ, rxMessage, portMAX_DELAY); 
     printf("msg Type= %x\n",  rxMessage[0]); 
 
@@ -827,7 +829,7 @@ void mixingTask(void * params) {
 
 
   while (1) {
-    vTaskDelayUntil(&xLastWakeTime, xStateUpdateFreq);
+    vTaskDelayUntil(&xLastWakeTime, xMixUpdateFreq);
     
     context.lock();
     context.setStateKey(context.getOctave(), context.getState() & KEY_MASK);
