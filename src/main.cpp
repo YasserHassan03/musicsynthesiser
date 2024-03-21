@@ -76,7 +76,7 @@ QueueHandle_t msgOutQ = xQueueCreate(36, MESSAGE_SIZE);
 SemaphoreHandle_t txSemaphore = xSemaphoreCreateCounting(3, 3);
 volatile uint32_t step = 0;
 volatile uint32_t stepArray[VOICES] = {0};
-std::vector<int32_t> recordVect ={};
+std::vector<int32_t> recordVect = {};
 volatile uint16_t yAxis = 555;
 // ISR's
 void sampleISR();
@@ -107,7 +107,7 @@ void setup()
 {
   for (int i = 0; i < 255; i++)
   {
-    sine[i] = (128 * sin((i * 2 * PI) / 255));//populate sine LUT on setup
+    sine[i] = (128 * sin((i * 2 * PI) / 255)); // populate sine LUT on setup
   }
   // Set pin directions
   pinMode(RA0_PIN, OUTPUT);
@@ -184,21 +184,21 @@ void setup()
   vTaskStartScheduler();
 }
 
-
 uint32_t genWaveform(uint32_t phaseAcc, uint8_t waveform)
 {
   uint32_t scaled = (phaseAcc >> 24);
-  switch (waveform){
-    case 0:
-      return scaled - 128; //sawtooth
-    case 1: //square
-      return scaled > 128 ?  127: -128;     
-    case 2: //sine
-      return (uint32_t)sine[scaled];
-    case 3: //triangle
-      return scaled < 129 ? 128 - 2*scaled : -127 + 2*(scaled - 128);
-    default:
-      return scaled - 128;
+  switch (waveform)
+  {
+  case 0:
+    return scaled - 128; // sawtooth
+  case 1:                // square
+    return scaled > 128 ? 127 : -128;
+  case 2: // sine
+    return (uint32_t)sine[scaled];
+  case 3: // triangle
+    return scaled < 129 ? 128 - 2 * scaled : -127 + 2 * (scaled - 128);
+  default:
+    return scaled - 128;
   }
 }
 
@@ -206,7 +206,7 @@ float calcPitchBend(uint16_t yAxis)
 {
   float pitchBend = (float)yAxis;
   if (pitchBend > 556 || pitchBend < 553)
-      return pitchBend > 554 ? 1 + (554-pitchBend)/5091.46: 1 + (554 - pitchBend)/6000;//posneg pitchbend for semitone
+    return pitchBend > 554 ? 1 + (554 - pitchBend) / 5091.46 : 1 + (554 - pitchBend) / 6000; // posneg pitchbend for semitone
   else
     return 1;
 }
@@ -217,7 +217,7 @@ float calcPitchBend(uint16_t yAxis)
 
 void sampleISR()
 {
-  uint16_t locBend = __atomic_load_n(&yAxis,__ATOMIC_RELAXED);
+  uint16_t locBend = __atomic_load_n(&yAxis, __ATOMIC_RELAXED);
   float pitchAmount = calcPitchBend(locBend);
   uint8_t volume;
   int32_t vout = 0;
@@ -225,7 +225,8 @@ void sampleISR()
   uint8_t scaleDynamic = 1;
   static uint32_t phaseAccArray[VOICES] = {};
   static uint32_t phaseAcc = 0;
-  for (int i = 0; i < VOICES; i++){
+  for (int i = 0; i < VOICES; i++)
+  {
     uint32_t currentStep = __atomic_load_n(&stepArray[i], __ATOMIC_RELAXED);
     float modStep = (float)currentStep * pitchAmount;
     phaseAccArray[i] += (uint32_t)modStep;
@@ -235,7 +236,7 @@ void sampleISR()
       vout += genWaveform(phaseAccArray[i], waveform);
     }
   }
-  vout = vout/scaleDynamic;
+  vout = vout / scaleDynamic;
   volume = context.getVolume(); // Atmoc operation
   vout = vout >> (8 - volume);
   analogWrite(OUTR_PIN, vout + 128);
@@ -258,6 +259,83 @@ void canTxISR(void)
 // --------------------   Tasks    --------------------- //
 // ----------------------------------------------------- //
 
+void drawSineWave()
+{
+  const int numPoints = 128;
+  const int amplitude = 10;
+  const int frequency = 2;
+  const float phaseShift = 0.1;
+  float phaseIncrement = TWO_PI / numPoints * frequency;
+  for (int i = 0; i < numPoints; i++)
+  {
+    float x = map(i, 0, numPoints, 0, u8g2.getDisplayWidth());
+    float y = amplitude * sin(i * phaseIncrement + phaseShift) + u8g2.getDisplayHeight() / 2;
+    u8g2.drawPixel(x, y);
+  }
+}
+
+void drawSquareWave()
+{
+  const int numPoints = 128;
+  const int amplitude = 10;
+  const int frequency = 2;
+  const float phaseShift = 0.1;
+  float phaseIncrement = TWO_PI / numPoints * frequency;
+  bool high = false;
+  float previousY = 0;
+
+  for (int i = 0; i < numPoints; i++)
+  {
+    float x = map(i, 0, numPoints, 0, u8g2.getDisplayWidth());
+    if (i % (numPoints / frequency) == 0)
+    {
+      high = !high;
+    }
+    float y;
+    if (high)
+    {
+      y = amplitude + u8g2.getDisplayHeight() / 2;
+    }
+    else
+    {
+      y = -amplitude + u8g2.getDisplayHeight() / 2;
+    }
+    u8g2.drawLine(x - 1, previousY, x, y);
+    previousY = y;
+  }
+}
+
+void drawSawtoothWave()
+{
+  const int numPoints = 128;
+  const int amplitude = 10;
+  const int frequency = 2;
+  const float phaseShift = 0.1;
+  float phaseIncrement = TWO_PI / numPoints * frequency;
+  float prevX, prevY;
+  for (int i = 0; i < numPoints; i++)
+  {
+    float x = map(i, 0, numPoints, 0, u8g2.getDisplayWidth());
+    float y = amplitude * ((i * phaseIncrement + phaseShift) - floor(i * phaseIncrement + phaseShift)) + u8g2.getDisplayHeight() / 2;
+    if (i > 0)
+    {
+      u8g2.drawLine(prevX, prevY, x, y);
+    }
+    prevX = x;
+    prevY = y;
+  }
+}
+
+void drawTriangle()
+{
+  // Draw the triangle wave
+  for (int x = 0; x < 128; x++)
+  {
+    int y = abs((x % 64) - 64 / 2) * 2 * 15 / 64 + 10;
+    u8g2.drawPixel(x, y);
+  }
+}
+
 // Display Task
 void loop()
 {
@@ -273,31 +351,78 @@ void loop()
   uint8_t volume;
   uint16_t y = analogRead(JOYY_PIN);
   __atomic_store_n(&yAxis, analogRead(JOYY_PIN), __ATOMIC_RELAXED);
-  float pitchBend = (float)y > 554 ? 2-(float)y/555: 1 + (554 - (float)y)/555;
+  float pitchBend = (float)y > 554 ? 2 - (float)y / 555 : 1 + (554 - (float)y) / 555;
   uint8_t waveform;
-  bool recording;
+  bool pageToggle;
   bool playback;
-  context.lock(); 
+  context.lock();
   copyState = context.getState();
   volume = context.getVolume();
   Octave octave = context.getOctave();
   waveform = context.getWaveform();
   playback = context.playbackState();
-  recording = context.recordingState();
+  pageToggle = context.updatePage();
   context.unlock();
+  const char *wavetype;
+  if (waveform == 0x0)
+  {
+    wavetype = "Sawtooth";
+  }
+  else if (waveform == 0x1)
+  {
+    wavetype = "Square";
+  }
+  else if (waveform == 0x2)
+  {
+    wavetype = "Sine";
+  }
+  else
+  {
+    wavetype = "Triangle";
+  }
+
   const char *note = getNote((uint16_t)copyState & KEY_MASK);
-  u8g2.setCursor(1, 10);
-  u8g2.print("Note: ");
-  u8g2.print(note);
-  u8g2.setCursor(2, 20);
-  u8g2.print(copyState, HEX);
-  // u8g2.setCursor(60, 20);
-  // u8g2.print(playback, HEX);
-  u8g2.setCursor(70, 20);
-  u8g2.print(waveform, HEX);
-  // u8g2.print( (((uint16_t) txMessages[1]) << 8) + txMessages[0], HEX);
-  u8g2.sendBuffer();          // transfer internal memory to the display
-  //Toggle LED
+  if (!pageToggle)
+  {
+    u8g2.setCursor(1, 10);
+    u8g2.print("Note: ");
+    u8g2.print(note);
+    u8g2.setCursor(2, 20);
+    u8g2.print("Wave: ");
+    u8g2.print(wavetype);
+    u8g2.setCursor(1, 30);
+    u8g2.print("Vol: ");
+    u8g2.print(volume, HEX);
+    u8g2.setCursor(40, 30);
+    u8g2.print("Oct: ");
+    u8g2.print(octave, HEX);
+ 
+    int y_flat = u8g2.getHeight() - (pitchBend - 0.45) * 15;
+    u8g2.drawFrame(u8g2.getWidth() - 10, u8g2.getHeight() -21, 10, 21);
+    u8g2.drawLine(u8g2.getWidth() - 10, y_flat, u8g2.getWidth(), y_flat);
+  }
+  else
+  {
+    if (wavetype == "Sine")
+    {
+      drawSineWave();
+    }
+    else if (wavetype == "Square")
+    {
+      drawSquareWave();
+    }
+    else if (wavetype == "Sawtooth")
+    {
+      drawSawtoothWave();
+    }
+    else
+    {
+      drawTriangle();
+    }
+  }
+
+  u8g2.sendBuffer(); // transfer internal memory to the display
+  // Toggle LED
   digitalToggle(LED_BUILTIN);
 }
 
@@ -335,7 +460,7 @@ void scanKeysTask(void *params)
     context.setState(newState);
     oct = context.getOctave();
     context.chooseWaveform(newState);
-    context.updateRecording(newState);
+    context.updatePage(newState);
     context.updatePlayback(newState);
     context.unlock();
     updateTxMessage(currentState, newState, oct);

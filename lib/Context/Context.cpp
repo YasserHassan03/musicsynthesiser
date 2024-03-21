@@ -3,7 +3,7 @@
 
 
 Context::Context()
-  :_state(0), _mutex(xSemaphoreCreateMutex()), _volume(0), _lowerLimit(0), _upperLimit(8), _octave(First), _waveform(0), _recording(false), _playback(false)
+  :_state(0), _mutex(xSemaphoreCreateMutex()), _volume(0), _lowerLimit(0), _upperLimit(8), _octave(First), _waveform(0), _Page(false), _playback(false)
   {}
 
 Context::~Context() {
@@ -37,6 +37,7 @@ void Context::updateVolume(uint32_t newState)
   uint8_t b = (newState & 0x8000) >> 15;
   
   
+  
   if ((previous_a == 0 && previous_b == 0 && a == 1 && b == 0) || (previous_a == 1 && previous_b == 1 && b == 1 && a == 0))
   {
     if (_volume < _upperLimit)
@@ -59,6 +60,7 @@ void Context::chooseWaveform(uint32_t newState)
   uint8_t previous_b = (_state & 0x2000) >> 13;
   uint8_t a = (newState & 0x1000) >> 12;
   uint8_t b = (newState & 0x2000) >> 13;
+  
 
   if ((previous_a == 0 && previous_b == 0 && a == 1 && b == 0) || (previous_a == 1 && previous_b == 1 && b == 1 && a == 0))
   {
@@ -84,12 +86,12 @@ void Context::chooseWaveform(uint32_t newState)
   }
 }
 
-void Context::updateRecording(uint32_t newState)
+void Context::updatePage(uint32_t newState)
 {
   uint8_t click = (newState & 0x200000) >> 21;
   if (click == 0)//active low
   {
-    _recording = !_recording;
+    _Page = !_Page;
   }
 }
 
