@@ -5,10 +5,10 @@
 
 // Small Enum no need for seperate header
 enum Octave {
-  First = 1, 
-  Second = 2, 
-  Third = 3, 
-  Fourth = 4
+  First = 0, 
+  Second = 1, 
+  Third = 2, 
+  Fourth = 3
 };
 
 
@@ -19,7 +19,6 @@ enum Role {
 
 
 // TODO: Add Octave for Handshake
-// For now Octave is Fixed
 class Context {
 private:
     uint32_t _state;
@@ -28,7 +27,8 @@ private:
     uint8_t _lowerLimit;
     uint8_t _upperLimit;
     Octave _octave;
-    Role _role;   
+    Role _role;
+    std::unordered_map<Octave, uint32_t> _neighborStates;
     
     
 public:
@@ -44,6 +44,7 @@ public:
     void setVolumeLimits(int lower, int upper);
     void inverseRole();
     void setOctave(Octave octave);
+    void setNeighborState(Octave octave, uint32_t state);
     
 
     // Getters are defined as inline for atomic operation -> i.e no jump instruction to get a value,
@@ -52,6 +53,7 @@ public:
     inline uint32_t getRole() { return _role; }; 
     inline uint32_t getState() { return _state; };
     inline Octave getOctave() { return _octave; };
+    uint32_t getNeighborState(Octave octave);
 
 };
 

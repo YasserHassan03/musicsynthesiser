@@ -3,7 +3,7 @@
 
 
 Context::Context()
-  :_state(0), _mutex(xSemaphoreCreateMutex()), _volume(8), _lowerLimit(0), _upperLimit(8), _octave(First), _role(Receiver)
+  :_state(0), _mutex(xSemaphoreCreateMutex()), _volume(8), _lowerLimit(0), _upperLimit(8), _octave(First), _role(Receiver), _neighborStates()
   {}
 
 Context::~Context() {
@@ -54,7 +54,6 @@ void Context::updateVolume(uint32_t newState)
 }
 
 
-
 void Context::inverseRole() { 
   _role = (Role) !_role;
 }
@@ -64,3 +63,17 @@ void Context::setOctave(Octave octave) {
   _octave = octave;
 }
 
+
+void Context::setNeighborState(Octave octave, uint32_t state) {
+  _neighborStates[octave] = state;
+}
+
+
+uint32_t Context::getNeighborState(Octave octave) { 
+  if (_neighborStates.find(octave) != _neighborStates.end())
+  {
+    return _neighborStates[octave];
+  } else {
+    return 0xfff;
+  }
+}
