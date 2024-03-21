@@ -69,12 +69,17 @@ const int HKOE_BIT = 6;
 #define SR_MESSAGE 0x98
 #define WAVE_MESSAGE 0x99
 #define WAVEFORM_MASK 0x2000000
+// #define DISABLE_ISR 
+// #define DISABLE_THREADS 
+// #define TEST_SCANKEYS
 
 
 // Initiaion Intervals
 const TickType_t xStateUpdateFreq = 50/portTICK_PERIOD_MS; // 50ms Initiation Interval
-const TickType_t xMixUpdateFreq = 100/portTICK_PERIOD_MS; // 50ms Initiation Interval
-const TickType_t xDebugFreq = 2000/portTICK_PERIOD_MS;
+const TickType_t xDecodeFreq = 70/portTICK_PERIOD_MS; // 50ms Initiation Interval
+const TickType_t xTransmitFreq = 100/portTICK_PERIOD_MS; // 50ms Initiation Interval
+const TickType_t xMixUpdateFreq = 110/portTICK_PERIOD_MS; // 50ms Initiation Interval
+// const TickType_t xDebugFreq = 2000/portTICK_PERIOD_MS;
 
 //Display driver object
 U8G2_SSD1305_128X32_NONAME_F_HW_I2C u8g2(U8G2_R0);
@@ -99,8 +104,8 @@ struct {
   SemaphoreHandle_t txSemaphore = xSemaphoreCreateCounting(3,3);
 } Message;
 
-QueueHandle_t msgInQ = xQueueCreate(36, MESSAGE_SIZE);
-QueueHandle_t msgOutQ = xQueueCreate(36, MESSAGE_SIZE);
+QueueHandle_t msgInQ = xQueueCreate(384, MESSAGE_SIZE);
+QueueHandle_t msgOutQ = xQueueCreate(384, MESSAGE_SIZE);
 
 struct { 
   volatile uint32_t stepArray[VOICES] = {0};
@@ -152,7 +157,6 @@ void printStatus (HAL_StatusTypeDef st, char * id) {
 }
 
 
-
 void initGPIO () { 
   __HAL_RCC_GPIOA_CLK_ENABLE();
   igpio.Pin = GPIO_PIN_4; 
@@ -160,7 +164,6 @@ void initGPIO () {
   igpio.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(&gpio, &igpio);
 }
-
 
 HAL_StatusTypeDef initDAC() { 
   __HAL_RCC_DAC1_CLK_ENABLE();   
@@ -251,7 +254,7 @@ void setup() {
 
   //Initialise UART
   Serial.begin(9600); 
- 
+  Serial.println("Starting");
 
   // DMA 
   status = HAL_Init();
@@ -285,17 +288,26 @@ void setup() {
 
   // TODO: Repace with Ping Pong buffer + DMA
   // Initialise DAC ISR
+  #ifndef DISABLE_ISR
   sampleTimer->setOverflow(DAC_WRITE_FREQ, HERTZ_FORMAT);
   if (context.getRole() == Receiver) { 
     sampleTimer->attachInterrupt(sampleISR);
     sampleTimer->resume();
   }
+  #endif
   
   // Initialise CAN RX ISR
   CAN_RegisterRX_ISR(canRxISR);
   CAN_RegisterTX_ISR(canTxISR);
+
+  #ifdef TEST_SCANKEYS
+  for (int i = 0; i < 200; i++){
+    uint8_t testMsg[8] = {0};
+    xQueueSend(msgOutQ, testMsg, portMAX_DELAY);
+  }
+  #endif
   
-  
+  #ifndef DISABLE_THREADS
   // Create Tasks
   xTaskCreate (
     scanKeysTask,		/* Function that implements the task */
@@ -342,6 +354,17 @@ void setup() {
 
   // Start Scheduler
   vTaskStartScheduler(); 
+  #endif
+
+  #ifdef TEST_SCANKEYS
+  uint32_t startTime = micros();
+	for (int iter = 0; iter < 20; iter++) {
+		mixingTask(NULL);
+	}
+	Serial.println(micros()-startTime);
+	while(1);
+  #endif
+
 }
 
 
@@ -624,6 +647,49 @@ void scanKeysTask(void *params)
   uint32_t newState = 0;
   Octave oct;
 
+  #ifdef TEST_SCANKEYS
+  for (int i = 0; i< 13; i++){
+    newState = readMatrix();
+    context.lock();
+    currentState = context.getState();
+    context.updateVolume(newState);
+    context.setState(newState);
+    oct = context.getOctave();
+    context.updatePage(newState);
+    context.unlock();
+    
+    if (true) {
+      xSemaphoreTake(Message.txSemaphore, portMAX_DELAY);
+      keyTxMessage(newState, oct);
+
+      if (true) { 
+        sendTxMessage(currentState, newState);
+      }
+
+      xSemaphoreGive(Message.txSemaphore);
+    }
+    
+    if (true) { 
+      context.lock();
+      context.inverseRole();
+      context.unlock();
+      xSemaphoreTake(Message.txSemaphore, portMAX_DELAY);
+      srTxMessage();
+      sendTxMessage(currentState, newState);
+      xSemaphoreGive(Message.txSemaphore);
+    }
+
+    if (true) { 
+      context.lock();
+      context.setNextWaveForm(newState);
+      context.unlock();
+      xSemaphoreTake(Message.txSemaphore, portMAX_DELAY);
+      waveTypeMessage();
+      sendTxMessage(currentState, newState);
+      xSemaphoreGive(Message.txSemaphore);
+    }
+  }
+  #else
   while (1)
   {
     vTaskDelayUntil(&xLastWakeTime, xStateUpdateFreq);
@@ -634,7 +700,6 @@ void scanKeysTask(void *params)
     context.setState(newState);
     oct = context.getOctave();
     context.updatePage(newState);
-    // context.chooseWaveform(newState);
     context.unlock();
     
     if ((currentState & KEY_MASK) != (newState & KEY_MASK)) {
@@ -669,6 +734,7 @@ void scanKeysTask(void *params)
     }
 
   }
+  #endif
 }
 
 
@@ -689,7 +755,31 @@ void decodeTask(void * params) {
   uint8_t rxMessage[8];
   Octave oct;
   uint16_t keyState;
-  
+  #ifdef TEST_SCANKEYS
+    xQueueReceive(msgInQ, rxMessage, portMAX_DELAY); 
+    // printf("msg Type= %x\n",  rxMessage[0]); 
+
+    if (true) { 
+      // printf("keyState: %x\n", (((uint16_t) rxMessage[2]) << 8) | rxMessage[1]);
+      oct = (Octave) rxMessage[3];
+      keyState = (((uint16_t) rxMessage[2]) << 8) | rxMessage[1];
+      context.lock();
+      context.setStateKey(oct, keyState);
+      context.unlock();
+    } else if (false) { 
+      uint32_t role = context.getRole();
+      // printf("role: %d\n", role);
+      if (role == Receiver) {
+        context.lock();
+        context.inverseRole();
+        context.unlock();
+      }
+    } else if (false) { 
+      context.lock();
+      context.setWaveform(rxMessage[1]);
+      context.unlock();
+    }
+  #else
   while (1) {
     xQueueReceive(msgInQ, rxMessage, portMAX_DELAY); 
     printf("msg Type= %x\n",  rxMessage[0]); 
@@ -715,18 +805,25 @@ void decodeTask(void * params) {
       context.unlock();
     }
   }
+  #endif
 }
-
-
 
 void transmitTask(void * params) {
 	uint8_t msgOut[8];
-
+  #ifdef TEST_SCANKEYS
+  for (int i = 0; i < 5; i++){
+    xQueueReceive(msgOutQ, msgOut, portMAX_DELAY);
+    xSemaphoreTake(Message.txSemaphore, portMAX_DELAY);
+    // CAN_TX(0x123, msgOut);
+    xSemaphoreGive(Message.txSemaphore);
+  }
+  #else
 	while (1) {
 		xQueueReceive(msgOutQ, msgOut, portMAX_DELAY);
 		xSemaphoreTake(Message.txSemaphore, portMAX_DELAY);
 		CAN_TX(0x123, msgOut);
 	}
+  #endif
 }
 
 // ----------------------------------------------------- //
@@ -823,7 +920,24 @@ void mixingTask(void * params) {
   TickType_t xLastWakeTime = xTaskGetTickCount();
   uint32_t copyStateArray[4] = {0, 0, 0, 0};
 
-
+  #ifdef TEST_SCANKEYS
+    // context.lock();
+    context.setStateKey(context.getOctave(), context.getState() & KEY_MASK);
+    for (int i = 0; i < 4; i++) { 
+      copyStateArray[i] = context.getStateKey((Octave) i) & KEY_MASK;
+    }
+    // context.unlock();
+    
+    for (int j = 0; j < 3; j++ ) { 
+      for (uint8_t i = 0; i < TOTAL_KEYS; i++) {
+        if ((copyStateArray[j] & keyMasks[i]) == 0) {
+          __atomic_store_n(&StepData.stepArray[j * VOICES_PER_BOARD + i], steps[i] << j, __ATOMIC_RELAXED);
+        } else { 
+          __atomic_store_n(&StepData.stepArray[j * VOICES_PER_BOARD + i], 0, __ATOMIC_RELAXED);
+        }
+      }
+    }
+  #else
   while (1) {
     vTaskDelayUntil(&xLastWakeTime, xStateUpdateFreq);
     
@@ -845,6 +959,7 @@ void mixingTask(void * params) {
     }
 
   }
+  #endif
 }
 
 
