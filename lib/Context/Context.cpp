@@ -2,8 +2,9 @@
 #include <cstdint>
 
 
+
 Context::Context()
-  :_state(0), _mutex(xSemaphoreCreateMutex()), _volume(0), _lowerLimit(0), _upperLimit(8), _octave(First)
+  :_state(0), _mutex(xSemaphoreCreateMutex()), _volume(0), _lowerLimit(0), _upperLimit(8), _octave(First), _role(Receiver)
   {}
 
 Context::~Context() {
