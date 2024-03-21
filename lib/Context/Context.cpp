@@ -55,30 +55,6 @@ void Context::updateVolume(uint32_t newState)
 }
 
 
-void Context::inverseRole() { 
-  _role = (Role) !_role;
-}
-
-
-void Context::setOctave(Octave octave) {
-  _octave = octave;
-}
-
-
-void Context::setNeighborState(Octave octave, uint32_t state) {
-  _neighborStates[octave] = state;
-}
-
-
-uint32_t Context::getNeighborState(Octave octave) { 
-  if (_neighborStates.find(octave) != _neighborStates.end())
-  {
-    return _neighborStates[octave];
-  } else {
-    return 0xfff;
-  }
-}
-
 
 void Context::inverseRole() { 
   _role = (Role) !_role;
