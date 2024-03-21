@@ -68,7 +68,7 @@ public:
     uint32_t getNeighborState(Octave octave);
 
     inline uint8_t getWaveform() { return _waveform; };
-    inline bool updatePage() { return _Page; };
+    inline bool getPage() { return _Page; };
     inline bool playbackState() { return _playback; };
   
 };

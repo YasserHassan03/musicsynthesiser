@@ -21,39 +21,40 @@
 #include <numeric>
 #include <cmath>
 
-// Constants
-const uint32_t interval = 100; // Display update interval
+//Constants
+const uint32_t interval = 100; //Display update interval
 uint32_t ID = 0x123;
 
-// Pin definitions
-// Row select and enable
+//Pin definitions
+//Row select and enable
 const int RA0_PIN = D3;
 const int RA1_PIN = D6;
 const int RA2_PIN = D12;
 const int REN_PIN = A5;
 
-// Matrix input and output
+//Matrix input and output
 const int C0_PIN = A2;
 const int C1_PIN = D9;
 const int C2_PIN = A6;
 const int C3_PIN = D1;
 const int OUT_PIN = D11;
 
-// Audio analogue out
+//Audio analogue out
 const int OUTL_PIN = A4;
 const int OUTR_PIN = A3;
 
-// Joystick analogue in
+//Joystick analogue in
 const int JOYY_PIN = A0;
 const int JOYX_PIN = A1;
 
-// Output multiplexer bits
+//Output multiplexer bits
 const int DEN_BIT = 3;
 const int DRST_BIT = 4;
 const int HKOW_BIT = 5;
 const int HKOE_BIT = 6;
 
-// DEFINES
+
+// DEFINES 
 #define KEY_MASK 0xFFF
 #define WEST_MASK 0x800000
 #define EAST_MASK 0x8000000
@@ -74,11 +75,13 @@ const TickType_t xDebugFreq = 2000/portTICK_PERIOD_MS;
 //Display driver object
 U8G2_SSD1305_128X32_NONAME_F_HW_I2C u8g2(U8G2_R0);
 
+
 // <$> Constant Arrays <$>
-const uint32_t steps[12] = {49977801, 54113269, 57330981, 60740013, 64351885, 68178311, 72232370, 76527532, 81078245, 85899346, 91007233, 96418697};
+const uint32_t steps[12] = {49977801, 54113269, 57330981, 60740013, 64351885, 68178311, 72232370, 76527532, 81078245, 85899346,91007233, 96418697}; 
 const uint16_t keyMasks[12] = {0x1, 0x2, 0x4, 0x8, 0x10, 0x20, 0x40, 0x80, 0x100, 0x200, 0x400, 0x800};
-const char *notes[13] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B", "No Note"};
-float sine[255] = {0};
+const char * notes[13] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B", "No Note"};
+float sine[255];
+
 
 // TODO: Change Context to singleton as per instruction
 // Initialise Global Variables
@@ -97,8 +100,8 @@ QueueHandle_t msgOutQ = xQueueCreate(36, MESSAGE_SIZE);
 
 volatile uint32_t step = 0;
 volatile uint32_t stepArray[VOICES] = {0};
-std::vector<int32_t> recordVect = {};
 volatile uint16_t yAxis = 555;
+
 // ISR's
 void sampleISR();
 void canRxISR();
@@ -110,7 +113,7 @@ void decodeTask(void * params);
 void transmitTask(void * params);
 void handShakeTask(void * params);
 
-// Task handles
+// Task handles 
 TaskHandle_t scanKeysHandle = NULL;
 TaskHandle_t decodeTaskHandle = NULL;
 TaskHandle_t transmitTaskHandle = NULL;
@@ -119,7 +122,7 @@ TaskHandle_t handShakeTaskHandle = NULL;
 // Helpers
 uint32_t getStepSize(uint16_t key);
 void setOutMuxBit(const uint8_t bitIdx, const bool value);
-uint8_t readCols();
+uint8_t readCols ();
 uint32_t readMatrix();
 void setRow (const uint8_t row);
 const char * getNote(const uint16_t keys);
@@ -217,6 +220,10 @@ struct DataHandle {
 DataHandle_t data;
 
 void setup() {
+  for (int i = 0; i < 255; i++)
+  {
+    sine[i] = (128 * sin((i * 2 * PI) / 255));//populate sine LUT on setup
+  }
 
   //Set pin directions
   pinMode(RA0_PIN, OUTPUT);
@@ -258,14 +265,15 @@ void setup() {
   //Initialise display
   setOutMuxBit(DRST_BIT, LOW);  //Assert display logic reset
   delayMicroseconds(2);
-  setOutMuxBit(DRST_BIT, HIGH); // Release display logic reset
+  setOutMuxBit(DRST_BIT, HIGH);  //Release display logic reset
   u8g2.begin();
-  setOutMuxBit(DEN_BIT, HIGH); // Enable display power supply
+  setOutMuxBit(DEN_BIT, HIGH);  //Enable display power supply
 
   // Initialise CAN Bus
   CAN_Init(false);
   setCANFilter(0x123,0x7ff);
   CAN_Start();
+
 
   // TODO: Repace with Ping Pong buffer + DMA
   // Initialise DAC ISR
@@ -278,24 +286,29 @@ void setup() {
   // Initialise CAN RX ISR
   CAN_RegisterRX_ISR(canRxISR);
   CAN_RegisterTX_ISR(canTxISR);
-
+  
+  
   // Create Tasks
   xTaskCreate(
-      scanKeysTask, /* Function that implements the task */
-      "scanKeys",   /* Text name for the task */
-      64,           /* Stack size in words, not bytes */
-      NULL,         /* Parameter passed into the task */
-      1,            /* Task priority */
-      &scanKeysHandle);
+    scanKeysTask,		/* Function that implements the task */
+    "scanKeys",		/* Text name for the task */
+    64,      		/* Stack size in words, not bytes */
+    NULL,			/* Parameter passed into the task */
+    1,			/* Task priority */
+    &scanKeysHandle 
+  ); 
+
 
   // TODO: Justify Parameters
   xTaskCreate(
-      decodeTask,  /* Function that implements the task */
-      "decodeMsg", /* Text name for the task */
-      64,          /* Stack size in words, not bytes */
-      NULL,        /* Parameter passed into the task */
-      1,           /* Task priority */
-      &decodeTaskHandle);
+    decodeTask,		/* Function that implements the task */
+    "decodeMsg",		/* Text name for the task */
+    64,      		/* Stack size in words, not bytes */
+    NULL,			/* Parameter passed into the task */
+    1,			/* Task priority */
+    &decodeTaskHandle 
+  );
+  
 
   // TODO: Justify Parameters
   xTaskCreate(
@@ -317,8 +330,9 @@ void setup() {
   // );
 
   // Start Scheduler
-  vTaskStartScheduler();
+  vTaskStartScheduler(); 
 }
+
 
 uint32_t genWaveform(uint32_t phaseAcc, uint8_t waveform)
 {
@@ -477,8 +491,7 @@ void loop()
 {
   static uint32_t next = millis();
   static uint32_t count = 0;
-  while (millis() < next)
-    ; // Wait for next interval
+  while (millis() < next); // Wait for next interval
   next += interval;
   // Update display
   u8g2.clearBuffer();                 // clear the internal memory
@@ -492,16 +505,16 @@ void loop()
   uint8_t waveform;
   bool pageToggle;
   bool playback;
-  context.lock();
   copyState = context.getState();
   role = context.getRole();
-  context.lock(); 
+  context.lock();
   volume = context.getVolume();
+  context.unlock();
   Octave octave = context.getOctave();
   waveform = context.getWaveform();
   playback = context.playbackState();
-  pageToggle = context.updatePage();
-  context.unlock();
+  pageToggle = context.getPage();
+
   const char * note = getNote((uint16_t) copyState & KEY_MASK);
   u8g2.drawStr(2, 10, note);
   u8g2.setCursor(2, 20);
@@ -510,7 +523,6 @@ void loop()
   u8g2.print(volume, HEX);
   u8g2.setCursor(60, 10);
   u8g2.drawStr(60, 10, (role == Sender) ? "S" : "R");
-  u8g2.sendBuffer();          // transfer internal memory to the display
   
   if (context.getRole() == Receiver && !sampleTimer->hasInterrupt()) { 
     sampleTimer->attachInterrupt(sampleISR);
@@ -519,23 +531,27 @@ void loop()
     sampleTimer->detachInterrupt();
     sampleTimer->resume();
   } 
-  // const char *wavetype;
-  // if (waveform == 0x0)
-  // {
-  //   wavetype = "Sawtooth";
-  // }
-  // else if (waveform == 0x1)
-  // {
-  //   wavetype = "Square";
-  // }
-  // else if (waveform == 0x2)
-  // {
-  //   wavetype = "Sine";
-  // }
-  // else
-  // {
-  //   wavetype = "Triangle";
-  // }
+
+  const char *wavetype;
+  if (waveform == 0x0)
+  {
+    wavetype = "Sawtooth";
+  }
+  else if (waveform == 0x1)
+  {
+    wavetype = "Square";
+  }
+  else if (waveform == 0x2)
+  {
+    wavetype = "Sine";
+  }
+  else
+  {
+    wavetype = "Triangle";
+  }
+
+  u8g2.setCursor(2, 30);
+  u8g2.print(wavetype);
 
   // const char *note = getNote((uint16_t)copyState & KEY_MASK);
   // if (!pageToggle)
@@ -578,6 +594,7 @@ void loop()
   // }
 
   u8g2.sendBuffer(); // transfer internal memory to the display
+  
   // Toggle LED
   digitalToggle(LED_BUILTIN);
 }
@@ -615,9 +632,8 @@ void scanKeysTask(void *params)
     context.chooseWaveform(newState);
     context.setState(newState);
     oct = context.getOctave();
-    context.chooseWaveform(newState);
     context.updatePage(newState);
-    context.updatePlayback(newState);
+    // context.updatePlayback(newState);
     context.unlock();
     
     if ((currentState & KEY_MASK) != (newState & KEY_MASK)) {
