@@ -36,8 +36,9 @@ private:
     Role _role;
     std::unordered_map<Octave, uint32_t> _neighborStates;
     uint8_t _waveform;
+    uint8_t _playback;
+
     bool _Page;
-    bool _playback;
     
     
 public:
@@ -55,9 +56,11 @@ public:
     void inverseRole();
     void setOctave(Octave octave);
     void setNeighborState(Octave octave, uint32_t state);
-    
     void updatePage(uint32_t newState);
-    void updatePlayback(uint32_t newState);
+
+    
+    void setNextWaveForm(uint32_t newState);
+    void setWaveform(uint8_t waveform);
 
     // Getters are defined as inline for atomic operation -> i.e no jump instruction to get a value,
     // The function call gets replaced with a ld instruction. This is so long as all our getters are <= 32 bits
@@ -66,10 +69,9 @@ public:
     inline uint32_t getState() { return _state; };
     inline Octave getOctave() { return _octave; };
     uint32_t getNeighborState(Octave octave);
-
     inline uint8_t getWaveform() { return _waveform; };
     inline bool getPage() { return _Page; };
-    inline bool playbackState() { return _playback; };
+
   
 };
 

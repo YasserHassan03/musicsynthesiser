@@ -66,6 +66,8 @@ const int HKOE_BIT = 6;
 #define L 64
 #define VOICES 12
 #define SR_MESSAGE 0x98
+#define WAVE_MESSAGE 0x99
+#define WAVEFORM_MASK 0x2000000
 
 
 // Initiaion Intervals
@@ -129,6 +131,7 @@ const char * getNote(const uint16_t keys);
 void serialPrintBuff(volatile uint8_t * buff);
 void keyTxMessage(uint32_t newState, Octave oct);
 void srTxMessage();
+void waveTypeMessage();
 
 DMA_HandleTypeDef hdma;
 DAC_HandleTypeDef hdac;
@@ -512,7 +515,6 @@ void loop()
   context.unlock();
   Octave octave = context.getOctave();
   waveform = context.getWaveform();
-  playback = context.playbackState();
   pageToggle = context.getPage();
 
   const char * note = getNote((uint16_t) copyState & KEY_MASK);
@@ -629,11 +631,10 @@ void scanKeysTask(void *params)
     context.lock();
     currentState = context.getState();
     context.updateVolume(newState);
-    context.chooseWaveform(newState);
     context.setState(newState);
     oct = context.getOctave();
     context.updatePage(newState);
-    // context.updatePlayback(newState);
+    // context.chooseWaveform(newState);
     context.unlock();
     
     if ((currentState & KEY_MASK) != (newState & KEY_MASK)) {
@@ -661,10 +662,29 @@ void scanKeysTask(void *params)
       xSemaphoreGive(Message.txSemaphore);
     }
 
+    if ((currentState & WAVEFORM_MASK) && !(newState & WAVEFORM_MASK)) { 
+      context.lock();
+      context.setNextWaveForm(newState);
+      context.unlock();
+      xSemaphoreTake(Message.txSemaphore, portMAX_DELAY);
+      waveTypeMessage();
+
+      if (!((currentState & WEST_MASK) == WEST_MASK) || !((currentState & EAST_MASK) == EAST_MASK)) {
+        xQueueSend(msgOutQ, Message.txMessages, portMAX_DELAY);
+      }
+
+      xSemaphoreGive(Message.txSemaphore);
+    }
+
     getStepSizes(newState & KEY_MASK);
   }
 }
 
+
+void waveTypeMessage() { 
+  Message.txMessages[0] = WAVE_MESSAGE;
+  Message.txMessages[1] = context.getWaveform();
+}
 
 void srTxMessage() { 
   Message.txMessages[0] = SR_MESSAGE;
@@ -684,7 +704,7 @@ void decodeTask(void * params) {
     if (rxMessage[0] == KEY_MESSAGE) { 
       printf("keyState: %x\n", (((uint16_t) rxMessage[2]) << 8) | rxMessage[1]);
       
-    } else if (rxMessage[0] == SR_MESSAGE){ 
+    } else if (rxMessage[0] == SR_MESSAGE) { 
       uint32_t role = context.getRole();
       printf("role: %d\n", role);
       if (role == Receiver) {
@@ -692,6 +712,10 @@ void decodeTask(void * params) {
         context.inverseRole();
         context.unlock();
       }
+    } else if (rxMessage[0] == WAVE_MESSAGE) { 
+      context.lock();
+      context.setWaveform(rxMessage[1]);
+      context.unlock();
     }
   }
 }

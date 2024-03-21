@@ -80,52 +80,50 @@ uint32_t Context::getNeighborState(Octave octave) {
   }
 }
 
-void Context::chooseWaveform(uint32_t newState)
-{
-  uint8_t previous_a = (_state & 0x1000) >> 12;
-  uint8_t previous_b = (_state & 0x2000) >> 13;
-  uint8_t a = (newState & 0x1000) >> 12;
-  uint8_t b = (newState & 0x2000) >> 13;
+// void Context::chooseWaveform(uint32_t newState)
+// {
+//   uint8_t previous_a = (_state & 0x1000) >> 12;
+//   uint8_t previous_b = (_state & 0x2000) >> 13;
+//   uint8_t a = (newState & 0x1000) >> 12;
+//   uint8_t b = (newState & 0x2000) >> 13;
   
 
-  if ((previous_a == 0 && previous_b == 0 && a == 1 && b == 0) || (previous_a == 1 && previous_b == 1 && b == 1 && a == 0))
-  {
-    if (_waveform < 3)
-    {
-      _waveform ++;
-    }
-    else
-    {
-      _waveform = 0;
-    }
-  }
-  else if ((previous_a == 1 && previous_b == 0 && a == 0 && b == 0) || (previous_a == 0 && previous_b == 1 && b == 1 && a == 1))
-  {
-    if (_waveform > 0)
-    {
-      _waveform --;
-    }
-    else
-    {
-      _waveform = 3;
-    }
-  }
-}
+//   if ((previous_a == 0 && previous_b == 0 && a == 1 && b == 0) || (previous_a == 1 && previous_b == 1 && b == 1 && a == 0))
+//   {
+//     if (_waveform < 3)
+//     {
+//       _waveform ++;
+//     }
+//     else
+//     {
+//       _waveform = 0;
+//     }
+//   }
+//   else if ((previous_a == 1 && previous_b == 0 && a == 0 && b == 0) || (previous_a == 0 && previous_b == 1 && b == 1 && a == 1))
+//   {
+//     if (_waveform > 0)
+//     {
+//       _waveform --;
+//     }
+//     else
+//     {
+//       _waveform = 3;
+//     }
+//   }
+// }
 
 void Context::updatePage(uint32_t newState)
 {
-  uint8_t click = (newState & 0x200000) >> 21;
-  if (click == 0)//active low
-  {
-    _Page = !_Page;
-  }
+  _Page = !_Page;
 }
 
-void Context::updatePlayback(uint32_t newState)
+void Context::setNextWaveForm(uint32_t newState)
 {
-  uint8_t click = (newState & 0x100000) >> 20;
-  if (click == 0)
-  {
-    _playback = !_playback;
-  }
+  _waveform = (_waveform + 1) % 4;
+}
+
+
+void Context::setWaveform(uint8_t waveform)
+{
+  _waveform = waveform;
 }
