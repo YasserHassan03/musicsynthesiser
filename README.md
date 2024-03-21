@@ -10,3 +10,5 @@
 3. [Shared Data Structures and Synchronisation Methods](./README3.md)
 
 4. [Inter-Task Blocking Dependencies and Deadlock Analysis](./README4.md)
+
+There is also a video available on microsoft stream
