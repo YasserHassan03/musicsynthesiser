@@ -17,11 +17,6 @@ enum Role {
   Receiver = 0x0
 };
 
-// enum Waveform {
-//   sawtooth,
-//   square,
-//   sine
-// };
 
 
 // TODO: Add Octave for Handshake
@@ -34,10 +29,9 @@ private:
     uint8_t _upperLimit;
     Octave _octave;
     Role _role;
-    std::unordered_map<Octave, uint32_t> _neighborStates;
-    uint8_t _waveform;
-    uint8_t _playback;
+    uint32_t _stateKeys[4];
 
+    uint8_t _waveform;
     bool _Page;
     
     
@@ -51,11 +45,10 @@ public:
     void lock();
     void unlock();
     void updateVolume(uint32_t newState);
-    void chooseWaveform(uint32_t newState);
     void setVolumeLimits(int lower, int upper);
     void inverseRole();
     void setOctave(Octave octave);
-    void setNeighborState(Octave octave, uint32_t state);
+    void setStateKey(Octave octave, uint32_t state);
     void updatePage(uint32_t newState);
 
     
@@ -71,6 +64,7 @@ public:
     uint32_t getNeighborState(Octave octave);
     inline uint8_t getWaveform() { return _waveform; };
     inline bool getPage() { return _Page; };
+    inline uint32_t getStateKey(Octave octave) { return _stateKeys[octave]; };
 
   
 };

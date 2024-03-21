@@ -64,7 +64,8 @@ const int HKOE_BIT = 6;
 #define TOTAL_KEYS 12u
 #define MESSAGE_SIZE 8
 #define L 64
-#define VOICES 12
+#define VOICES 24
+#define VOICES_PER_BOARD 12
 #define SR_MESSAGE 0x98
 #define WAVE_MESSAGE 0x99
 #define WAVEFORM_MASK 0x2000000
@@ -72,6 +73,7 @@ const int HKOE_BIT = 6;
 
 // Initiaion Intervals
 const TickType_t xStateUpdateFreq = 50/portTICK_PERIOD_MS; // 50ms Initiation Interval
+const TickType_t xMixUpdateFreq = 100/portTICK_PERIOD_MS; // 50ms Initiation Interval
 const TickType_t xDebugFreq = 2000/portTICK_PERIOD_MS;
 
 //Display driver object
@@ -100,8 +102,11 @@ struct {
 QueueHandle_t msgInQ = xQueueCreate(36, MESSAGE_SIZE);
 QueueHandle_t msgOutQ = xQueueCreate(36, MESSAGE_SIZE);
 
-volatile uint32_t step = 0;
-volatile uint32_t stepArray[VOICES] = {0};
+struct { 
+  volatile uint32_t stepArray[VOICES] = {0};
+  SemaphoreHandle_t stepMutex = xSemaphoreCreateMutex();
+} StepData;
+
 volatile uint16_t yAxis = 555;
 
 // ISR's
@@ -113,13 +118,13 @@ void canTxISR();
 void scanKeysTask(void * params);
 void decodeTask(void * params);
 void transmitTask(void * params);
-void handShakeTask(void * params);
+void mixingTask(void * params);
 
 // Task handles 
 TaskHandle_t scanKeysHandle = NULL;
 TaskHandle_t decodeTaskHandle = NULL;
 TaskHandle_t transmitTaskHandle = NULL;
-TaskHandle_t handShakeTaskHandle = NULL;
+TaskHandle_t mixingTaskHandle = NULL;
 
 // Helpers
 uint32_t getStepSize(uint16_t key);
@@ -292,7 +297,7 @@ void setup() {
   
   
   // Create Tasks
-  xTaskCreate(
+  xTaskCreate (
     scanKeysTask,		/* Function that implements the task */
     "scanKeys",		/* Text name for the task */
     64,      		/* Stack size in words, not bytes */
@@ -303,7 +308,7 @@ void setup() {
 
 
   // TODO: Justify Parameters
-  xTaskCreate(
+  xTaskCreate (
     decodeTask,		/* Function that implements the task */
     "decodeMsg",		/* Text name for the task */
     64,      		/* Stack size in words, not bytes */
@@ -314,7 +319,7 @@ void setup() {
   
 
   // TODO: Justify Parameters
-  xTaskCreate(
+  xTaskCreate (
     transmitTask,		/* Function that implements the task */
     "transmitTask",		/* Text name for the task */
     64,      		/* Stack size in words, not bytes */
@@ -323,6 +328,17 @@ void setup() {
     &transmitTaskHandle 
   );
   
+
+
+    // TODO: Justify Parameters
+  xTaskCreate (
+    mixingTask,		/* Function that implements the task */
+    "MIXINGTask",		/* Text name for the task */
+    64,      		/* Stack size in words, not bytes */
+    NULL,			/* Parameter passed into the task */
+    1,			/* Task priority */
+    &mixingTaskHandle 
+  );
 
   // Start Scheduler
   vTaskStartScheduler(); 
@@ -372,7 +388,7 @@ void sampleISR()
   static uint32_t phaseAcc = 0;
   for (int i = 0; i < VOICES; i++)
   {
-    uint32_t currentStep = __atomic_load_n(&stepArray[i], __ATOMIC_RELAXED);
+    uint32_t currentStep = __atomic_load_n(&StepData.stepArray[i], __ATOMIC_RELAXED);
     float modStep = (float)currentStep * pitchAmount;
     phaseAccArray[i] += (uint32_t)modStep;
     if (currentStep != 0)
@@ -593,21 +609,6 @@ void loop()
   digitalToggle(LED_BUILTIN);
 }
 
-void getStepSizes(uint16_t key)
-{
-  for (uint8_t i = 0; i < TOTAL_KEYS; i++)
-  {
-    if ((key & keyMasks[i]) == 0)
-    {
-      __atomic_store_n(&stepArray[i], steps[i], __ATOMIC_RELAXED);
-    }
-    else
-    {
-      __atomic_store_n(&stepArray[i], 0, __ATOMIC_RELAXED);
-    }
-  }
-}
-
 
 void sendTxMessage(uint32_t currentState, uint32_t newState) {
   if (!((currentState & WEST_MASK) == WEST_MASK) || !((currentState & EAST_MASK) == EAST_MASK)) {
@@ -667,7 +668,6 @@ void scanKeysTask(void *params)
       xSemaphoreGive(Message.txSemaphore);
     }
 
-    getStepSizes(newState & KEY_MASK);
   }
 }
 
@@ -696,13 +696,11 @@ void decodeTask(void * params) {
 
     if (rxMessage[0] == KEY_MESSAGE && context.getRole() == Receiver) { 
       printf("keyState: %x\n", (((uint16_t) rxMessage[2]) << 8) | rxMessage[1]);
-      // oct = (Octave) rxMessage[3];
-      // keyState = (((uint16_t) rxMessage[2]) << 8) | rxMessage[1];
-
-      // context.lock();
-      // context.setNeighborState(oct, keyState);
-      // context.unlock();
-      
+      oct = (Octave) rxMessage[3];
+      keyState = (((uint16_t) rxMessage[2]) << 8) | rxMessage[1];
+      context.lock();
+      context.setStateKey(oct, keyState);
+      context.unlock();
     } else if (rxMessage[0] == SR_MESSAGE) { 
       uint32_t role = context.getRole();
       printf("role: %d\n", role);
@@ -729,7 +727,6 @@ void transmitTask(void * params) {
 		xSemaphoreTake(Message.txSemaphore, portMAX_DELAY);
 		CAN_TX(0x123, msgOut);
 	}
-
 }
 
 // ----------------------------------------------------- //
@@ -821,3 +818,33 @@ void handShakeTask(void * params) {
   }
   vTaskDelete(NULL);
 }
+
+void mixingTask(void * params) { 
+  TickType_t xLastWakeTime = xTaskGetTickCount();
+  uint32_t copyStateArray[4] = {0, 0, 0, 0};
+
+
+  while (1) {
+    vTaskDelayUntil(&xLastWakeTime, xStateUpdateFreq);
+    
+    context.lock();
+    context.setStateKey(context.getOctave(), context.getState() & KEY_MASK);
+    for (int i = 0; i < 4; i++) { 
+      copyStateArray[i] = context.getStateKey((Octave) i) & KEY_MASK;
+    }
+    context.unlock();
+    
+    for (int j = 0; j < 2; j++ ) { 
+      for (uint8_t i = 0; i < TOTAL_KEYS; i++) {
+        if ((copyStateArray[j] & keyMasks[i]) == 0) {
+          __atomic_store_n(&StepData.stepArray[j * VOICES_PER_BOARD + i], steps[i] << j, __ATOMIC_RELAXED);
+        } else { 
+          __atomic_store_n(&StepData.stepArray[j * VOICES_PER_BOARD + i], 0, __ATOMIC_RELAXED);
+        }
+      }
+    }
+
+  }
+}
+
+
