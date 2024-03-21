@@ -269,13 +269,7 @@ void drawSineWave() {
   }
 }
 
-int square(float val) {
-  if (val >= 0 && val <= PI) {
-    return 1;
-  } else {
-    return -1;
-  }
-}
+
 void drawSquareWave() {
   const int numPoints = 128;
   const int amplitude = 10;
@@ -318,7 +312,6 @@ void drawSawtoothWave() {
     prevY = y;
   }
 }
-
 
 void drawTriangle() {
   // Draw the triangle wave
