@@ -3,7 +3,7 @@
 
 
 Context::Context()
-  :_state(0), _mutex(xSemaphoreCreateMutex()), _volume(8), _lowerLimit(0), _upperLimit(8), _octave(First), _role(Receiver), _neighborStates()
+  :_state(0), _mutex(xSemaphoreCreateMutex()), _volume(8), _lowerLimit(0), _upperLimit(8), _octave(First), _waveform(0), _Page(false), _playback(false), _role(Receiver), _neighborStates()
   {}
 
 Context::~Context() {
@@ -35,6 +35,7 @@ void Context::updateVolume(uint32_t newState)
   uint8_t previous_b = (_state & 0x8000) >> 15;
   uint8_t a = (newState & 0x4000) >> 14;
   uint8_t b = (newState & 0x8000) >> 15;
+  
   
   
   if ((previous_a == 0 && previous_b == 0 && a == 1 && b == 0) || (previous_a == 1 && previous_b == 1 && b == 1 && a == 0))
@@ -75,5 +76,80 @@ uint32_t Context::getNeighborState(Octave octave) {
     return _neighborStates[octave];
   } else {
     return 0xfff;
+  }
+}
+
+
+void Context::inverseRole() { 
+  _role = (Role) !_role;
+}
+
+
+void Context::setOctave(Octave octave) {
+  _octave = octave;
+}
+
+
+void Context::setNeighborState(Octave octave, uint32_t state) {
+  _neighborStates[octave] = state;
+}
+
+
+uint32_t Context::getNeighborState(Octave octave) { 
+  if (_neighborStates.find(octave) != _neighborStates.end())
+  {
+    return _neighborStates[octave];
+  } else {
+    return 0xfff;
+  }
+}
+
+void Context::chooseWaveform(uint32_t newState)
+{
+  uint8_t previous_a = (_state & 0x1000) >> 12;
+  uint8_t previous_b = (_state & 0x2000) >> 13;
+  uint8_t a = (newState & 0x1000) >> 12;
+  uint8_t b = (newState & 0x2000) >> 13;
+  
+
+  if ((previous_a == 0 && previous_b == 0 && a == 1 && b == 0) || (previous_a == 1 && previous_b == 1 && b == 1 && a == 0))
+  {
+    if (_waveform < 3)
+    {
+      _waveform ++;
+    }
+    else
+    {
+      _waveform = 0;
+    }
+  }
+  else if ((previous_a == 1 && previous_b == 0 && a == 0 && b == 0) || (previous_a == 0 && previous_b == 1 && b == 1 && a == 1))
+  {
+    if (_waveform > 0)
+    {
+      _waveform --;
+    }
+    else
+    {
+      _waveform = 3;
+    }
+  }
+}
+
+void Context::updatePage(uint32_t newState)
+{
+  uint8_t click = (newState & 0x200000) >> 21;
+  if (click == 0)//active low
+  {
+    _Page = !_Page;
+  }
+}
+
+void Context::updatePlayback(uint32_t newState)
+{
+  uint8_t click = (newState & 0x100000) >> 20;
+  if (click == 0)
+  {
+    _playback = !_playback;
   }
 }

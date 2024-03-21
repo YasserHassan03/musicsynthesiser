@@ -16,42 +16,44 @@
 #include "stm32l4xx_hal_rcc.h"
 #include "stm32l4xx_hal_tim.h"
 #include "wiring_time.h"
+#include <iostream>
+#include <list>
+#include <numeric>
+#include <cmath>
 
-
-//Constants
-const uint32_t interval = 100; //Display update interval
+// Constants
+const uint32_t interval = 100; // Display update interval
 uint32_t ID = 0x123;
 
-//Pin definitions
-//Row select and enable
+// Pin definitions
+// Row select and enable
 const int RA0_PIN = D3;
 const int RA1_PIN = D6;
 const int RA2_PIN = D12;
 const int REN_PIN = A5;
 
-//Matrix input and output
+// Matrix input and output
 const int C0_PIN = A2;
 const int C1_PIN = D9;
 const int C2_PIN = A6;
 const int C3_PIN = D1;
 const int OUT_PIN = D11;
 
-//Audio analogue out
+// Audio analogue out
 const int OUTL_PIN = A4;
 const int OUTR_PIN = A3;
 
-//Joystick analogue in
+// Joystick analogue in
 const int JOYY_PIN = A0;
 const int JOYX_PIN = A1;
 
-//Output multiplexer bits
+// Output multiplexer bits
 const int DEN_BIT = 3;
 const int DRST_BIT = 4;
 const int HKOW_BIT = 5;
 const int HKOE_BIT = 6;
 
-
-// DEFINES 
+// DEFINES
 #define KEY_MASK 0xFFF
 #define WEST_MASK 0x800000
 #define EAST_MASK 0x8000000
@@ -72,12 +74,11 @@ const TickType_t xDebugFreq = 2000/portTICK_PERIOD_MS;
 //Display driver object
 U8G2_SSD1305_128X32_NONAME_F_HW_I2C u8g2(U8G2_R0);
 
-
 // <$> Constant Arrays <$>
-const uint32_t steps[12] = {49977801, 54113269, 57330981, 60740013, 64351885, 68178311, 72232370, 76527532, 81078245, 85899346,91007233, 96418697}; 
+const uint32_t steps[12] = {49977801, 54113269, 57330981, 60740013, 64351885, 68178311, 72232370, 76527532, 81078245, 85899346, 91007233, 96418697};
 const uint16_t keyMasks[12] = {0x1, 0x2, 0x4, 0x8, 0x10, 0x20, 0x40, 0x80, 0x100, 0x200, 0x400, 0x800};
-const char * notes[13] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B", "No Note"};
-
+const char *notes[13] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B", "No Note"};
+float sine[255] = {0};
 
 // TODO: Change Context to singleton as per instruction
 // Initialise Global Variables
@@ -96,7 +97,8 @@ QueueHandle_t msgOutQ = xQueueCreate(36, MESSAGE_SIZE);
 
 volatile uint32_t step = 0;
 volatile uint32_t stepArray[VOICES] = {0};
-
+std::vector<int32_t> recordVect = {};
+volatile uint16_t yAxis = 555;
 // ISR's
 void sampleISR();
 void canRxISR();
@@ -108,7 +110,7 @@ void decodeTask(void * params);
 void transmitTask(void * params);
 void handShakeTask(void * params);
 
-// Task handles 
+// Task handles
 TaskHandle_t scanKeysHandle = NULL;
 TaskHandle_t decodeTaskHandle = NULL;
 TaskHandle_t transmitTaskHandle = NULL;
@@ -117,7 +119,7 @@ TaskHandle_t handShakeTaskHandle = NULL;
 // Helpers
 uint32_t getStepSize(uint16_t key);
 void setOutMuxBit(const uint8_t bitIdx, const bool value);
-uint8_t readCols ();
+uint8_t readCols();
 uint32_t readMatrix();
 void setRow (const uint8_t row);
 const char * getNote(const uint16_t keys);
@@ -256,15 +258,14 @@ void setup() {
   //Initialise display
   setOutMuxBit(DRST_BIT, LOW);  //Assert display logic reset
   delayMicroseconds(2);
-  setOutMuxBit(DRST_BIT, HIGH);  //Release display logic reset
+  setOutMuxBit(DRST_BIT, HIGH); // Release display logic reset
   u8g2.begin();
-  setOutMuxBit(DEN_BIT, HIGH);  //Enable display power supply
+  setOutMuxBit(DEN_BIT, HIGH); // Enable display power supply
 
   // Initialise CAN Bus
   CAN_Init(false);
   setCANFilter(0x123,0x7ff);
   CAN_Start();
-
 
   // TODO: Repace with Ping Pong buffer + DMA
   // Initialise DAC ISR
@@ -277,29 +278,24 @@ void setup() {
   // Initialise CAN RX ISR
   CAN_RegisterRX_ISR(canRxISR);
   CAN_RegisterTX_ISR(canTxISR);
-  
-  
+
   // Create Tasks
   xTaskCreate(
-    scanKeysTask,		/* Function that implements the task */
-    "scanKeys",		/* Text name for the task */
-    64,      		/* Stack size in words, not bytes */
-    NULL,			/* Parameter passed into the task */
-    1,			/* Task priority */
-    &scanKeysHandle 
-  ); 
-
+      scanKeysTask, /* Function that implements the task */
+      "scanKeys",   /* Text name for the task */
+      64,           /* Stack size in words, not bytes */
+      NULL,         /* Parameter passed into the task */
+      1,            /* Task priority */
+      &scanKeysHandle);
 
   // TODO: Justify Parameters
   xTaskCreate(
-    decodeTask,		/* Function that implements the task */
-    "decodeMsg",		/* Text name for the task */
-    64,      		/* Stack size in words, not bytes */
-    NULL,			/* Parameter passed into the task */
-    1,			/* Task priority */
-    &decodeTaskHandle 
-  );
-  
+      decodeTask,  /* Function that implements the task */
+      "decodeMsg", /* Text name for the task */
+      64,          /* Stack size in words, not bytes */
+      NULL,        /* Parameter passed into the task */
+      1,           /* Task priority */
+      &decodeTaskHandle);
 
   // TODO: Justify Parameters
   xTaskCreate(
@@ -321,11 +317,35 @@ void setup() {
   // );
 
   // Start Scheduler
-  vTaskStartScheduler(); 
+  vTaskStartScheduler();
 }
 
+uint32_t genWaveform(uint32_t phaseAcc, uint8_t waveform)
+{
+  uint32_t scaled = (phaseAcc >> 24);
+  switch (waveform)
+  {
+  case 0:
+    return scaled - 128; // sawtooth
+  case 1:                // square
+    return scaled > 128 ? 127 : -128;
+  case 2: // sine
+    return (uint32_t)sine[scaled];
+  case 3: // triangle
+    return scaled < 129 ? 128 - 2 * scaled : -127 + 2 * (scaled - 128);
+  default:
+    return scaled - 128;
+  }
+}
 
-
+float calcPitchBend(uint16_t yAxis)
+{
+  float pitchBend = (float)yAxis;
+  if (pitchBend > 556 || pitchBend < 553)
+    return pitchBend > 554 ? 1 + (554 - pitchBend) / 5091.46 : 1 + (554 - pitchBend) / 6000; // posneg pitchbend for semitone
+  else
+    return 1;
+}
 
 // ----------------------------------------------------- //
 // --------------------   ISR's    --------------------- //
@@ -333,18 +353,26 @@ void setup() {
 
 void sampleISR()
 {
+  uint16_t locBend = __atomic_load_n(&yAxis, __ATOMIC_RELAXED);
+  float pitchAmount = calcPitchBend(locBend);
   uint8_t volume;
   int32_t vout = 0;
-  static uint32_t phaseAccArray[VOICES] = {0};
+  uint8_t waveform = context.getWaveform();
+  uint8_t scaleDynamic = 1;
+  static uint32_t phaseAccArray[VOICES] = {};
   static uint32_t phaseAcc = 0;
-  for (int i = 0; i < VOICES; i++){
+  for (int i = 0; i < VOICES; i++)
+  {
     uint32_t currentStep = __atomic_load_n(&stepArray[i], __ATOMIC_RELAXED);
-    phaseAccArray[i] += currentStep;
-    if (currentStep != 0){
-      vout += ((phaseAccArray[i] >> 24) - 128);
+    float modStep = (float)currentStep * pitchAmount;
+    phaseAccArray[i] += (uint32_t)modStep;
+    if (currentStep != 0)
+    {
+      scaleDynamic += 1;
+      vout += genWaveform(phaseAccArray[i], waveform);
     }
   }
-  vout = vout/VOICES;
+  vout = vout / scaleDynamic;
   volume = context.getVolume(); // Atmoc operation
   vout = vout >> (8 - volume);
   analogWrite(OUTR_PIN, vout + 128);
@@ -367,26 +395,112 @@ void canTxISR (void) {
 // --------------------   Tasks    --------------------- //
 // ----------------------------------------------------- //
 
+void drawSineWave()
+{
+  const int numPoints = 128;
+  const int amplitude = 10;
+  const int frequency = 2;
+  const float phaseShift = 0.1;
+  float phaseIncrement = TWO_PI / numPoints * frequency;
+  for (int i = 0; i < numPoints; i++)
+  {
+    float x = map(i, 0, numPoints, 0, u8g2.getDisplayWidth());
+    float y = amplitude * sin(i * phaseIncrement + phaseShift) + u8g2.getDisplayHeight() / 2;
+    u8g2.drawPixel(x, y);
+  }
+}
+
+void drawSquareWave()
+{
+  const int numPoints = 128;
+  const int amplitude = 10;
+  const int frequency = 2;
+  const float phaseShift = 0.1;
+  float phaseIncrement = TWO_PI / numPoints * frequency;
+  bool high = false;
+  float previousY = 0;
+
+  for (int i = 0; i < numPoints; i++)
+  {
+    float x = map(i, 0, numPoints, 0, u8g2.getDisplayWidth());
+    if (i % (numPoints / frequency) == 0)
+    {
+      high = !high;
+    }
+    float y;
+    if (high)
+    {
+      y = amplitude + u8g2.getDisplayHeight() / 2;
+    }
+    else
+    {
+      y = -amplitude + u8g2.getDisplayHeight() / 2;
+    }
+    u8g2.drawLine(x - 1, previousY, x, y);
+    previousY = y;
+  }
+}
+
+void drawSawtoothWave()
+{
+  const int numPoints = 128;
+  const int amplitude = 10;
+  const int frequency = 2;
+  const float phaseShift = 0.1;
+  float phaseIncrement = TWO_PI / numPoints * frequency;
+  float prevX, prevY;
+  for (int i = 0; i < numPoints; i++)
+  {
+    float x = map(i, 0, numPoints, 0, u8g2.getDisplayWidth());
+    float y = amplitude * ((i * phaseIncrement + phaseShift) - floor(i * phaseIncrement + phaseShift)) + u8g2.getDisplayHeight() / 2;
+    if (i > 0)
+    {
+      u8g2.drawLine(prevX, prevY, x, y);
+    }
+    prevX = x;
+    prevY = y;
+  }
+}
+
+void drawTriangle()
+{
+  // Draw the triangle wave
+  for (int x = 0; x < 128; x++)
+  {
+    int y = abs((x % 64) - 64 / 2) * 2 * 15 / 64 + 10;
+    u8g2.drawPixel(x, y);
+  }
+}
 
 // Display Task
-void loop() {
+void loop()
+{
   static uint32_t next = millis();
   static uint32_t count = 0;
-
-  while (millis() < next);  //Wait for next interval
-
+  while (millis() < next)
+    ; // Wait for next interval
   next += interval;
-
-  //Update display
-  u8g2.clearBuffer();         // clear the internal memory
+  // Update display
+  u8g2.clearBuffer();                 // clear the internal memory
   u8g2.setFont(u8g2_font_ncenB08_tr); // choose a suitable font
   uint32_t copyState;
   uint8_t volume;
+  uint16_t y = analogRead(JOYY_PIN);
   uint32_t role;
+  __atomic_store_n(&yAxis, analogRead(JOYY_PIN), __ATOMIC_RELAXED);
+  float pitchBend = (float)y > 554 ? 2 - (float)y / 555 : 1 + (554 - (float)y) / 555;
+  uint8_t waveform;
+  bool pageToggle;
+  bool playback;
+  context.lock();
   copyState = context.getState();
   role = context.getRole();
   context.lock(); 
   volume = context.getVolume();
+  Octave octave = context.getOctave();
+  waveform = context.getWaveform();
+  playback = context.playbackState();
+  pageToggle = context.updatePage();
   context.unlock();
   const char * note = getNote((uint16_t) copyState & KEY_MASK);
   u8g2.drawStr(2, 10, note);
@@ -405,36 +519,91 @@ void loop() {
     sampleTimer->detachInterrupt();
     sampleTimer->resume();
   } 
+  // const char *wavetype;
+  // if (waveform == 0x0)
+  // {
+  //   wavetype = "Sawtooth";
+  // }
+  // else if (waveform == 0x1)
+  // {
+  //   wavetype = "Square";
+  // }
+  // else if (waveform == 0x2)
+  // {
+  //   wavetype = "Sine";
+  // }
+  // else
+  // {
+  //   wavetype = "Triangle";
+  // }
 
-  
-  //Toggle LED
+  // const char *note = getNote((uint16_t)copyState & KEY_MASK);
+  // if (!pageToggle)
+  // {
+  //   u8g2.setCursor(1, 10);
+  //   u8g2.print("Note: ");
+  //   u8g2.print(note);
+  //   u8g2.setCursor(2, 20);
+  //   u8g2.print("Wave: ");
+  //   u8g2.print(wavetype);
+  //   u8g2.setCursor(1, 30);
+  //   u8g2.print("Vol: ");
+  //   u8g2.print(volume, HEX);
+  //   u8g2.setCursor(40, 30);
+  //   u8g2.print("Oct: ");
+  //   u8g2.print(octave, HEX);
+ 
+  //   int y_flat = u8g2.getHeight() - (pitchBend - 0.45) * 15;
+  //   u8g2.drawFrame(u8g2.getWidth() - 10, u8g2.getHeight() -21, 10, 21);
+  //   u8g2.drawLine(u8g2.getWidth() - 10, y_flat, u8g2.getWidth(), y_flat);
+  // }
+  // else
+  // {
+  //   if (wavetype == "Sine")
+  //   {
+  //     drawSineWave();
+  //   }
+  //   else if (wavetype == "Square")
+  //   {
+  //     drawSquareWave();
+  //   }
+  //   else if (wavetype == "Sawtooth")
+  //   {
+  //     drawSawtoothWave();
+  //   }
+  //   else
+  //   {
+  //     drawTriangle();
+  //   }
+  // }
+
+  u8g2.sendBuffer(); // transfer internal memory to the display
+  // Toggle LED
   digitalToggle(LED_BUILTIN);
 }
 
-
-void getStepSizes(uint16_t key) {
-  for (uint8_t i = 0; i < TOTAL_KEYS; i++) {
-    if ((key & keyMasks[i]) == 0) {
-       __atomic_store_n(&stepArray[i], steps[i], __ATOMIC_RELAXED);
-    }else{
+void getStepSizes(uint16_t key)
+{
+  for (uint8_t i = 0; i < TOTAL_KEYS; i++)
+  {
+    if ((key & keyMasks[i]) == 0)
+    {
+      __atomic_store_n(&stepArray[i], steps[i], __ATOMIC_RELAXED);
+    }
+    else
+    {
       __atomic_store_n(&stepArray[i], 0, __ATOMIC_RELAXED);
     }
   }
 }
 
-void scanKeysTask(void * params) {
+void scanKeysTask(void *params)
+{
 
-  uint32_t stepValue = 0;
   TickType_t xLastWakeTime = xTaskGetTickCount();
   uint32_t currentState = 0;
   uint32_t newState = 0;
   Octave oct;
-  uint32_t noteArray[VOICES] = {0};
-  uint32_t curVoices = 0;
-  uint8_t currentConnection;
-  uint8_t newConnection;
-  uint8_t westPin;
-  uint8_t eastPin;
 
   while (1)
   {
@@ -443,8 +612,12 @@ void scanKeysTask(void * params) {
     context.lock();
     currentState = context.getState();
     context.updateVolume(newState);
+    context.chooseWaveform(newState);
     context.setState(newState);
     oct = context.getOctave();
+    context.chooseWaveform(newState);
+    context.updatePage(newState);
+    context.updatePlayback(newState);
     context.unlock();
     
     if ((currentState & KEY_MASK) != (newState & KEY_MASK)) {
@@ -474,7 +647,6 @@ void scanKeysTask(void * params) {
 
     getStepSizes(newState & KEY_MASK);
   }
-
 }
 
 
@@ -509,6 +681,7 @@ void decodeTask(void * params) {
 }
 
 
+
 void transmitTask(void * params) {
 	uint8_t msgOut[8];
 
@@ -520,68 +693,66 @@ void transmitTask(void * params) {
 
 }
 
-
-
-// ----------------------------------------------------- // 
-// ----------------     Helpers    --------------------- // 
+// ----------------------------------------------------- //
+// ----------------     Helpers    --------------------- //
 // ----------------------------------------------------- //
 
-
-uint32_t getStepSize(uint16_t key) {
-  for (uint8_t i = 0; i < TOTAL_KEYS; i++) {
-    if ((key & keyMasks[i]) == 0) {
+uint32_t getStepSize(uint16_t key)
+{
+  for (uint8_t i = 0; i < TOTAL_KEYS; i++)
+  {
+    if ((key & keyMasks[i]) == 0)
+    {
       return steps[i];
     }
   }
   return 0;
 }
 
-
-
-
-//Function to set outputs using key matrix
-void setOutMuxBit(const uint8_t bitIdx, const bool value) {
-  digitalWrite(REN_PIN,LOW);
+// Function to set outputs using key matrix
+void setOutMuxBit(const uint8_t bitIdx, const bool value)
+{
+  digitalWrite(REN_PIN, LOW);
   digitalWrite(RA0_PIN, bitIdx & 0x01);
   digitalWrite(RA1_PIN, bitIdx & 0x02);
   digitalWrite(RA2_PIN, bitIdx & 0x04);
-  digitalWrite(OUT_PIN,value);
-  digitalWrite(REN_PIN,HIGH);
+  digitalWrite(OUT_PIN, value);
+  digitalWrite(REN_PIN, HIGH);
   delayMicroseconds(2);
-  digitalWrite(REN_PIN,LOW);
+  digitalWrite(REN_PIN, LOW);
 }
 
-
-
-uint8_t readCols () {
-  return  ((digitalRead(C3_PIN) & 0x1) << 3) + ((digitalRead(C2_PIN) & 0x1) << 2) + ((digitalRead(C1_PIN) & 0x1) << 1) + (digitalRead(C0_PIN) & 0x1);
+uint8_t readCols()
+{
+  return ((digitalRead(C3_PIN) & 0x1) << 3) + ((digitalRead(C2_PIN) & 0x1) << 2) + ((digitalRead(C1_PIN) & 0x1) << 1) + (digitalRead(C0_PIN) & 0x1);
 }
 
-
-void setRow (const uint8_t row) {
-  digitalWrite(REN_PIN,LOW);
+void setRow(const uint8_t row)
+{
+  digitalWrite(REN_PIN, LOW);
   digitalWrite(RA0_PIN, row & 0x01);
   digitalWrite(RA1_PIN, row & 0x02);
   digitalWrite(RA2_PIN, row & 0x04);
-  digitalWrite(REN_PIN,HIGH);
+  digitalWrite(REN_PIN, HIGH);
 }
 
-
-uint32_t readMatrix() {
+uint32_t readMatrix()
+{
   uint32_t result = 0;
 
-  for (uint8_t row = 0; row < 9; row++) {
+  for (uint8_t row = 0; row < 9; row++)
+  {
     setRow(row);
     delayMicroseconds(2);
     result |= (readCols() << (row * 4));
   }
 
   return result;
-
 }
 
 // function that matches the step size to the note
-const char * getNote(const uint16_t keys) {
+const char *getNote(const uint16_t keys)
+{
   for (int i = 0; i < TOTAL_KEYS; ++i)
   {
     if ((keys & keyMasks[i]) == 0)
