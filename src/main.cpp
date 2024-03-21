@@ -479,8 +479,10 @@ void decodeTask(void * params) {
   while (1) {
     xQueueReceive(msgInQ, rxMessage, portMAX_DELAY); 
     printf("msg Type= %x\n",  rxMessage[0]); 
-    // TODO: Implement Mixer in order to respond to incoming messages
+
     if (rxMessage[0] == KEY_MESSAGE) { 
+      printf("keyState: %x\n", (((uint16_t) rxMessage[2]) << 8) | rxMessage[1]);
+      
     } else if (rxMessage[0] == SR_MESSAGE){ 
       uint32_t role = context.getRole();
       printf("role: %d\n", role);
@@ -581,7 +583,7 @@ const char * getNote(const uint16_t keys) {
 void keyTxMessage(uint32_t newState, Octave oct) {
   Message.txMessages[0] = KEY_MESSAGE; 
   Message.txMessages[1] = (uint8_t) (newState & KEY_MASK);
-  Message.txMessages[2] = (uint8_t) (newState & KEY_MASK) >> 8;
+  Message.txMessages[2] = (uint8_t) ((newState & KEY_MASK) >> 8);
   Message.txMessages[3] = oct;   
   return;
 }
