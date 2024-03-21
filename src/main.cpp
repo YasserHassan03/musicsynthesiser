@@ -136,7 +136,7 @@ void setOutMuxBit(const uint8_t bitIdx, const bool value);
 uint8_t readCols ();
 uint32_t readMatrix();
 void setRow (const uint8_t row);
-const char * getNote(const uint16_t keys);
+std::string getNote(const uint16_t keys);
 void serialPrintBuff(volatile uint8_t * buff);
 void keyTxMessage(uint32_t newState, Octave oct);
 void srTxMessage();
@@ -537,7 +537,7 @@ void loop()
   waveform = context.getWaveform();
   pageToggle = context.getPage();
 
-  const char * note = getNote((uint16_t) copyState & KEY_MASK);
+  std::string note = getNote((uint16_t) copyState & KEY_MASK);
   // u8g2.drawStr(2, 10, note);
   // u8g2.setCursor(2, 20);
   // u8g2.print(copyState, HEX);
@@ -572,16 +572,12 @@ void loop()
     wavetype = "Triangle";
   }
 
-  // u8g2.setCursor(2, 30);
-  // u8g2.print(wavetype);
 
- 
-  //const char *note = getNote((uint16_t)copyState & KEY_MASK);
   if (!pageToggle)
   {
     u8g2.setCursor(1, 10);
     u8g2.print("Note: ");
-    u8g2.print(note);
+    u8g2.print(note.c_str());
     u8g2.setCursor(2, 20);
     u8g2.print("Wave: ");
     u8g2.print(wavetype);
@@ -875,16 +871,27 @@ uint32_t readMatrix()
 }
 
 // function that matches the step size to the note
-const char *getNote(const uint16_t keys)
+std::string getNote(const uint16_t keys)
 {
+  std::string build;
+  int buildOrNah = 0;
+  
   for (int i = 0; i < TOTAL_KEYS; ++i)
   {
+    if (buildOrNah == 6)
+      break;
+      
     if ((keys & keyMasks[i]) == 0)
     {
-      return notes[i];
+      if(buildOrNah == 0)
+        build = "";
+
+      build += notes[i];
+      buildOrNah++;
     }
   }
-  return notes[12];
+
+  return buildOrNah ? build : notes[12];
 }
 
 
