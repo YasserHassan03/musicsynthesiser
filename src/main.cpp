@@ -63,7 +63,7 @@ U8G2_SSD1305_128X32_NONAME_F_HW_I2C u8g2(U8G2_R0);
 const uint32_t steps[12] = {49977801, 54113269, 57330981, 60740013, 64351885, 68178311, 72232370, 76527532, 81078245, 85899346, 91007233, 96418697};
 const uint16_t keyMasks[12] = {0x1, 0x2, 0x4, 0x8, 0x10, 0x20, 0x40, 0x80, 0x100, 0x200, 0x400, 0x800};
 const char *notes[13] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B", "No Note"};
-int32_t sine[255] = {0};
+float sine[255] = {0};
 
 // TODO: Change Context to singleton as per instruction
 // Initialise Global Variables
@@ -77,6 +77,7 @@ SemaphoreHandle_t txSemaphore = xSemaphoreCreateCounting(3, 3);
 volatile uint32_t step = 0;
 volatile uint32_t stepArray[VOICES] = {0};
 std::vector<int32_t> recordVect ={};
+volatile uint16_t yAxis = 555;
 // ISR's
 void sampleISR();
 void canRxISR();
@@ -106,7 +107,7 @@ void setup()
 {
   for (int i = 0; i < 255; i++)
   {
-    sine[i] = (int32_t)(127 * sin((i * 2 * PI) / 255));
+    sine[i] = (128 * sin((i * 2 * PI) / 255));//populate sine LUT on setup
   }
   // Set pin directions
   pinMode(RA0_PIN, OUTPUT);
@@ -183,29 +184,31 @@ void setup()
   vTaskStartScheduler();
 }
 
-int32_t genSine(int32_t x)
-{ // maclaurin
-  return (int32_t)(x - (x * x * x) / 6 + (x * x * x * x * x) / 120 - (x * x * x * x * x * x * x) / 5040 +
-                   (x * x * x * x * x * x * x * x * x) / 362880 - (x * x * x * x * x * x * x * x * x * x * x) / 39916800) +
-         (x * x * x * x * x * x * x * x * x * x * x * x) / 6227020800 - (x * x * x * x * x * x * x * x * x * x * x * x * x * x) / 1307674368000;
-}
 
-int32_t genWaveform(uint32_t phaseAcc, uint8_t waveform)
+uint32_t genWaveform(uint32_t phaseAcc, uint8_t waveform)
 {
-  int32_t scaled = phaseAcc >> 24;
+  uint32_t scaled = (phaseAcc >> 24);
   switch (waveform){
     case 0:
       return scaled - 128; //sawtooth
     case 1: //square
       return scaled > 128 ?  127: -128;     
     case 2: //sine
-      //return sine[scaled];
-      return scaled > 127 ? 128*genSine((int32_t)PI*(scaled-128)/127) : 127*genSine((int32_t)PI*(scaled-127)/127);//accurate range -pi to pi
+      return (uint32_t)sine[scaled];
     case 3: //triangle
-      return scaled < 128 ? 127 - 2*scaled : -127 + 2*(scaled - 128);
+      return scaled < 129 ? 128 - 2*scaled : -127 + 2*(scaled - 128);
     default:
       return scaled - 128;
   }
+}
+
+float calcPitchBend(uint16_t yAxis)
+{
+  float pitchBend = (float)yAxis;
+  if (pitchBend > 556 || pitchBend < 553)
+      return pitchBend > 554 ? 1 + (554-pitchBend)/5091.46: 1 + (554 - pitchBend)/6000;//posneg pitchbend for semitone
+  else
+    return 1;
 }
 
 // ----------------------------------------------------- //
@@ -214,24 +217,25 @@ int32_t genWaveform(uint32_t phaseAcc, uint8_t waveform)
 
 void sampleISR()
 {
+  uint16_t locBend = __atomic_load_n(&yAxis,__ATOMIC_RELAXED);
+  float pitchAmount = calcPitchBend(locBend);
   uint8_t volume;
   int32_t vout = 0;
-  uint8_t scaleDynamic = 1;
-  static uint32_t phaseAccArray[VOICES] = {0};
-  static uint32_t phaseAcc = 0;
   uint8_t waveform = context.getWaveform();
-  bool recording = context.recordingState();
-  bool playback = context.playbackState();
+  uint8_t scaleDynamic = 1;
+  static uint32_t phaseAccArray[VOICES] = {};
+  static uint32_t phaseAcc = 0;
   for (int i = 0; i < VOICES; i++){
     uint32_t currentStep = __atomic_load_n(&stepArray[i], __ATOMIC_RELAXED);
-    phaseAccArray[i] += currentStep;
+    float modStep = (float)currentStep * pitchAmount;
+    phaseAccArray[i] += (uint32_t)modStep;
     if (currentStep != 0)
     {
       scaleDynamic += 1;
       vout += genWaveform(phaseAccArray[i], waveform);
     }
   }
-  vout = vout / scaleDynamic;
+  vout = vout/scaleDynamic;
   volume = context.getVolume(); // Atmoc operation
   vout = vout >> (8 - volume);
   analogWrite(OUTR_PIN, vout + 128);
@@ -267,6 +271,9 @@ void loop()
   u8g2.setFont(u8g2_font_ncenB08_tr); // choose a suitable font
   uint32_t copyState;
   uint8_t volume;
+  uint16_t y = analogRead(JOYY_PIN);
+  __atomic_store_n(&yAxis, analogRead(JOYY_PIN), __ATOMIC_RELAXED);
+  float pitchBend = (float)y > 554 ? 2-(float)y/555: 1 + (554 - (float)y)/555;
   uint8_t waveform;
   bool recording;
   bool playback;
@@ -284,10 +291,10 @@ void loop()
   u8g2.print(note);
   u8g2.setCursor(2, 20);
   u8g2.print(copyState, HEX);
-  u8g2.setCursor(60, 20);
-  u8g2.print(playback, HEX);
+  // u8g2.setCursor(60, 20);
+  // u8g2.print(playback, HEX);
   u8g2.setCursor(70, 20);
-  u8g2.print(recording, HEX);
+  u8g2.print(waveform, HEX);
   // u8g2.print( (((uint16_t) txMessages[1]) << 8) + txMessages[0], HEX);
   u8g2.sendBuffer();          // transfer internal memory to the display
   //Toggle LED
