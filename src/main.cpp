@@ -193,19 +193,18 @@ int32_t genSine(int32_t x)
 int32_t genWaveform(uint32_t phaseAcc, uint8_t waveform)
 {
   int32_t scaled = phaseAcc >> 24;
-  switch (waveform)
-  {
-  case 0:
-    return scaled - 128; // sawtooth
-  case 1:                // square
-    return scaled > 128 ? 127 : -128;
-  case 2: // sine
-    // return sine[scaled];
-    return scaled > 127 ? 128 * genSine((int32_t)PI * (scaled - 128) / 128) : 127 * genSine((int32_t)PI * (scaled - 127) / 127); // accurate range -pi to pi
-  case 3:                                                                                                                        // triangle
-    return scaled < 128 ? 127 - 2 * scaled : -127 + 2 * (scaled - 128);
-  default:
-    return scaled - 128;
+  switch (waveform){
+    case 0:
+      return scaled - 128; //sawtooth
+    case 1: //square
+      return scaled > 128 ?  127: -128;     
+    case 2: //sine
+      //return sine[scaled];
+      return scaled > 127 ? 128*genSine((int32_t)PI*(scaled-128)/127) : 127*genSine((int32_t)PI*(scaled-127)/127);//accurate range -pi to pi
+    case 3: //triangle
+      return scaled < 128 ? 127 - 2*scaled : -127 + 2*(scaled - 128);
+    default:
+      return scaled - 128;
   }
 }
 
@@ -235,13 +234,6 @@ void sampleISR()
   vout = vout / scaleDynamic;
   volume = context.getVolume(); // Atmoc operation
   vout = vout >> (8 - volume);
-  // if (recording){
-  //    recordVect.push_back(vout);
-  // }
-  // if (playback){
-  //   vout = recordVect.front();
-  //   recordVect.pop_front();
-  // }
   analogWrite(OUTR_PIN, vout + 128);
 }
 
